@@ -6,7 +6,6 @@ function PathResults({ userProfile, pathScores, setPathScores, recommendedPaths,
 
   useEffect(() => {
     if (userProfile && !recommendedPaths) {
-      // Convert VEKTOR form answers to the scoring engine's format
       const profile = {
         skills: userProfile.strengths || [],
         interests: [userProfile.interest, "AI", "Web3"].filter(Boolean),
@@ -24,7 +23,6 @@ function PathResults({ userProfile, pathScores, setPathScores, recommendedPaths,
       const bundle = getRecommendationBundle(profile)
       const ranked = rankPathsForUser(profile)
 
-      // Build scores object for display
       const scores = {}
       ranked.forEach(p => { scores[p.pathId] = Math.round(p.fitScore * 10) })
 
@@ -47,7 +45,7 @@ function PathResults({ userProfile, pathScores, setPathScores, recommendedPaths,
     </div>
   )
 
-  const bundle = getRecommendationBundle({
+  const profile = {
     skills: userProfile.strengths || [],
     interests: [userProfile.interest, "AI", "Web3"].filter(Boolean),
     personality: [],
@@ -59,7 +57,9 @@ function PathResults({ userProfile, pathScores, setPathScores, recommendedPaths,
     avoids: [],
     needsBeginnerFriendly: userProfile.experience === "beginner" || userProfile.experience === "some",
     riskTolerance: userProfile.urgency === "very" ? "Low" : "Medium"
-  })
+  }
+
+  const bundle = getRecommendationBundle(profile)
 
   const top3Ids = [
     recommendedPaths.best?.[0],
@@ -156,4 +156,18 @@ const styles = {
   label: { color: "#666", fontSize: "11px", letterSpacing: "1px", marginBottom: "8px" },
   pathName: { color: "white", fontSize: "16px", marginBottom: "16px", lineHeight: "1.4" },
   scoreBar: { background: "#1a1a1a", borderRadius: "4px", height: "6px", marginBottom: "6px" },
-  scoreFill
+  scoreFill: { background: "#00ff88", height: "100%", borderRadius: "4px" },
+  scoreText: { color: "#00ff88", fontSize: "13px", marginBottom: "12px" },
+  difficulty: { color: "#888", fontSize: "12px", marginBottom: "8px" },
+  meta: { color: "#666", fontSize: "12px", marginBottom: "6px" },
+  incomeBox: { background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: "6px", padding: "10px", marginBottom: "12px" },
+  incomeTitle: { color: "#666", fontSize: "11px", marginBottom: "6px", letterSpacing: "1px" },
+  incomeLine: { color: "#aaa", fontSize: "11px", marginBottom: "3px" },
+  metaGreen: { color: "#4a9", fontSize: "12px", marginBottom: "6px" },
+  metaRed: { color: "#a64", fontSize: "12px", marginBottom: "6px" },
+  warning: { color: "#aa8800", fontSize: "11px", background: "#1a1200", padding: "8px", borderRadius: "4px", marginBottom: "6px" },
+  chooseBtn: { marginTop: "16px", width: "100%", padding: "12px", background: "transparent", color: "#00ff88", border: "1px solid #00ff88", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", cursor: "pointer", transition: "all 0.15s ease" },
+  btn: { padding: "16px 32px", background: "#00ff88", color: "#000", border: "none", borderRadius: "8px", fontSize: "15px", fontWeight: "bold", cursor: "pointer" }
+}
+
+export default PathResults
