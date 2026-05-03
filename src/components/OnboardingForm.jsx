@@ -12,6 +12,16 @@ const STRENGTHS_OPTIONS = [
   { id: "notsure",    label: "🤷 Not Sure Yet" }
 ]
 
+const LEARNING_STYLE_OPTIONS = [
+  { id: "videos",   label: "🎥 Video tutorials — YouTube, online courses" },
+  { id: "llm",      label: "🤖 AI-guided — Claude or ChatGPT as my tutor" },
+  { id: "reading",  label: "📖 Reading — articles, docs, books" },
+  { id: "building", label: "🔨 Building things — learn by doing" },
+  { id: "tasks",    label: "✅ Checklists — give me structured tasks" },
+  { id: "cohort",   label: "👥 Cohort courses — learning with other people" },
+  { id: "mixed",    label: "🔀 Mixed — combine everything" }
+]
+
 function OnboardingForm({ setCurrentScreen, setUserProfile }) {
   const [step, setStep] = useState(0)
   const [form, setForm] = useState({
@@ -19,7 +29,7 @@ function OnboardingForm({ setCurrentScreen, setUserProfile }) {
     budget: "", hoursPerDay: 1, urgency: "", background: "", learningStyle: ""
   })
 
-  const totalSteps = 8
+  const totalSteps = 9
 
   function updateField(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -44,12 +54,13 @@ function OnboardingForm({ setCurrentScreen, setUserProfile }) {
       case 5: return form.hoursPerDay > 0
       case 6: return form.urgency !== ""
       case 7: return form.background.trim().length > 10
+      case 8: return form.learningStyle !== ""
       default: return true
     }
   }
 
   function handleFinish() {
-    const finalProfile = { ...form, learningStyle: form.learningStyle || "mixed" }
+    const finalProfile = { ...form }
     save("profile", finalProfile)
     setUserProfile(finalProfile)
     setCurrentScreen("results")
@@ -174,6 +185,18 @@ function OnboardingForm({ setCurrentScreen, setUserProfile }) {
             <p style={{ color: form.background.length > 10 ? "#00ff88" : "#666", fontSize: "12px" }}>
               {form.background.length} characters {form.background.length < 10 ? "(write more)" : "✓"}
             </p>
+          </div>
+        )}
+
+        {step === 8 && (
+          <div>
+            <h2 style={styles.question}>How do you learn best?</h2>
+            <p style={styles.hint}>This shapes how your entire guide is structured</p>
+            {LEARNING_STYLE_OPTIONS.map(opt => (
+              <button key={opt.id}
+                style={{ ...styles.optionBtn, ...(form.learningStyle === opt.id ? styles.optionBtnActive : {}) }}
+                onClick={() => updateField("learningStyle", opt.id)}>{opt.label}</button>
+            ))}
           </div>
         )}
 
