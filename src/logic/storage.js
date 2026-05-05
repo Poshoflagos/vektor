@@ -3,37 +3,51 @@
 // localStorage = your browser's built-in notebook. Survives page refresh.
 
 const KEYS = {
-  access:       "vektor_access",
-  profile:      "vektor_profile",
-  scores:       "vektor_scores",
-  paths:        "vektor_paths",
-  guideType:    "vektor_guideType",
-  prompt:       "vektor_prompt",
-  aiResult:     "vektor_aiResult",
-  reports:      "vektor_reports",
+  access: "vektor_access",
+  profile: "vektor_profile",
+  scores: "vektor_scores",
+  paths: "vektor_paths",
+  guideType: "vektor_guideType",
+  prompt: "vektor_prompt",
+  aiResult: "vektor_aiResult",
+  reports: "vektor_reports",
   selectedPath: "vektor_selectedPath",
-  tracker:      "vektor_tracker"
-};
+  tracker: "vektor_tracker",
+  hasSeenIntro: "vektor_hasSeenIntro",
+  feedback: "vektor_feedback",
+  darkMode: "vektor_darkmode"
+}
 
 export function save(key, value) {
   try {
-    localStorage.setItem(KEYS[key], JSON.stringify(value));
+    if (!KEYS[key]) {
+      console.warn(`Unknown storage key: ${key}`)
+      return
+    }
+
+    localStorage.setItem(KEYS[key], JSON.stringify(value))
   } catch (err) {
-    console.error("Save failed:", err);
+    console.error("Save failed:", err)
   }
 }
 
 export function load(key) {
   try {
-    const item = localStorage.getItem(KEYS[key]);
-    return item ? JSON.parse(item) : null;
+    if (!KEYS[key]) {
+      console.warn(`Unknown storage key: ${key}`)
+      return null
+    }
+
+    const item = localStorage.getItem(KEYS[key])
+    return item ? JSON.parse(item) : null
   } catch {
-    return null;
+    return null
   }
 }
 
 export function saveReport(pathName, guideType, content) {
-  const existing = load("reports") || [];
+  const existing = load("reports") || []
+
   const newReport = {
     id: `rpt_${Date.now()}`,
     date: new Date().toLocaleDateString("en-GB"),
@@ -41,17 +55,27 @@ export function saveReport(pathName, guideType, content) {
     guideType,
     content,
     savedAt: new Date().toISOString()
-  };
-  existing.push(newReport);
-  save("reports", existing);
-  return newReport;
+  }
+
+  existing.push(newReport)
+  save("reports", existing)
+
+  return newReport
 }
 
 export function deleteReport(reportId) {
-  const existing = load("reports") || [];
-  save("reports", existing.filter(r => r.id !== reportId));
+  const existing = load("reports") || []
+  const filtered = existing.filter(report => report.id !== reportId)
+
+  save("reports", filtered)
 }
 
 export function resetAll() {
-  Object.values(KEYS).forEach(key => localStorage.removeItem(key));
+  try {
+    Object.values(KEYS).forEach(key => {
+      localStorage.removeItem(key)
+    })
+  } catch (err) {
+    console.error("Reset failed:", err)
+  }
 }

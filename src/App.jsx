@@ -10,6 +10,8 @@ import SavedReports from "./components/SavedReports"
 import NavBar from "./components/NavBar"
 import Tracker from "./components/Tracker"
 import Settings from "./components/Settings"
+import IntroLesson from "./components/IntroLesson"
+import BeginnerIntroPrompt from "./components/BeginnerIntroPrompt"
 import PasswordGate from "./components/PasswordGate"
 
 function App() {
@@ -24,10 +26,6 @@ function App() {
   const [savedReports, setSavedReports] = useState([])
   const [selectedPath, setSelectedPath] = useState(null)
   const [trackerTasks, setTrackerTasks] = useState([])
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem("vektor_darkmode")
-    return saved !== null ? JSON.parse(saved) : true
-  })
 
   useEffect(() => {
     const hasAccess = load("access")
@@ -42,6 +40,7 @@ function App() {
       setIsAuthenticated(true)
       setCurrentScreen("welcome")
     }
+
     if (savedProfile) setUserProfile(savedProfile)
     if (savedScores) setPathScores(savedScores)
     if (savedPaths) setRecommendedPaths(savedPaths)
@@ -50,67 +49,41 @@ function App() {
     if (savedPath) setSelectedPath(savedPath)
   }, [])
 
-  function toggleDarkMode() {
-    setDarkMode(prev => {
-      const next = !prev
-      localStorage.setItem("vektor_darkmode", JSON.stringify(next))
-      return next
-    })
-  }
-
-  const theme = {
-    bg: darkMode ? "#0a0a0a" : "#f0f0f0",
-    card: darkMode ? "#111" : "#ffffff",
-    border: darkMode ? "#222" : "#ddd",
-    text: darkMode ? "#ffffff" : "#000000",
-    subtext: darkMode ? "#888" : "#555",
-    accent: "#00ff88",
-    muted: darkMode ? "#333" : "#ccc"
-  }
-
   return (
-    <div style={{ background: theme.bg, minHeight: "100vh" }}>
-
-      {/* Dark/Light Toggle — always visible */}
-      <button
-        onClick={toggleDarkMode}
-        style={{
-          position: "fixed",
-          top: "12px",
-          right: "16px",
-          zIndex: 9999,
-          padding: "6px 14px",
-          background: darkMode ? "#1a1a1a" : "#e0e0e0",
-          border: darkMode ? "1px solid #333" : "1px solid #bbb",
-          borderRadius: "20px",
-          color: darkMode ? "#fff" : "#000",
-          fontSize: "12px",
-          cursor: "pointer",
-          fontWeight: "600",
-          fontFamily: "'Segoe UI', sans-serif"
-        }}
-      >
-        {darkMode ? "☀️ Light" : "🌙 Dark"}
-      </button>
-
+    <div style={{ minHeight: "100vh", background: "#0a0a0a" }}>
       <NavBar currentScreen={currentScreen} onNavigate={setCurrentScreen} />
 
-      <div style={{ paddingTop: "56px" }}>
+      <div
+        style={{
+          paddingTop: "56px",
+          minHeight: "100vh"
+        }}
+      >
         {currentScreen === "password" && (
           <PasswordGate
             setIsAuthenticated={setIsAuthenticated}
             setCurrentScreen={setCurrentScreen}
           />
         )}
+
         {currentScreen === "welcome" && (
-          <Welcome setCurrentScreen={setCurrentScreen} />
+          <Welcome
+            setCurrentScreen={setCurrentScreen}
+            userProfile={userProfile}
+            selectedPath={selectedPath}
+            savedReports={savedReports}
+            trackerTasks={trackerTasks}
+            recommendedPaths={recommendedPaths}
+          />
         )}
+
         {currentScreen === "form" && (
           <OnboardingForm
             setCurrentScreen={setCurrentScreen}
             setUserProfile={setUserProfile}
           />
         )}
+
         {currentScreen === "results" && (
           <PathResults
             userProfile={userProfile}
@@ -122,12 +95,14 @@ function App() {
             setSelectedPath={setSelectedPath}
           />
         )}
+
         {currentScreen === "guideSelect" && (
           <GuideSelector
             setGuideType={setGuideType}
             setCurrentScreen={setCurrentScreen}
           />
         )}
+
         {currentScreen === "prompt" && (
           <PromptGenerator
             userProfile={userProfile}
@@ -136,6 +111,7 @@ function App() {
             setCurrentScreen={setCurrentScreen}
           />
         )}
+
         {currentScreen === "paste" && (
           <PasteResult
             recommendedPaths={recommendedPaths}
@@ -144,18 +120,28 @@ function App() {
             setSavedReports={setSavedReports}
           />
         )}
+
         {currentScreen === "reports" && (
           <SavedReports setCurrentScreen={setCurrentScreen} />
         )}
+
         {currentScreen === "tracker" && (
           <Tracker setCurrentScreen={setCurrentScreen} />
         )}
+
         {currentScreen === "settings" && (
           <Settings
             setCurrentScreen={setCurrentScreen}
             setIsAuthenticated={setIsAuthenticated}
           />
         )}
+
+        {currentScreen === "introLesson" && (
+          <IntroLesson setCurrentScreen={setCurrentScreen} />
+        )}
+        {currentScreen === "introPrompt" && (
+  <BeginnerIntroPrompt setCurrentScreen={setCurrentScreen} />
+)}
       </div>
     </div>
   )
