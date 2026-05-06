@@ -2,7 +2,13 @@ import { useEffect, useState } from "react"
 import { buildPrompt } from "../logic/promptBuilder"
 import { load } from "../logic/storage"
 
-function PromptGenerator({ userProfile, recommendedPaths, guideType, setCurrentScreen }) {
+function PromptGenerator({
+  userProfile,
+  recommendedPaths,
+  selectedPath,
+  guideType,
+  setCurrentScreen
+}) {
   const [prompt, setPrompt] = useState("")
   const [copied, setCopied] = useState(false)
   const [pathName, setPathName] = useState("")
@@ -10,19 +16,30 @@ function PromptGenerator({ userProfile, recommendedPaths, guideType, setCurrentS
   useEffect(() => {
     const profile = userProfile || load("profile")
     const paths = recommendedPaths || load("paths")
-    const guide = guideType || load("guideType")
+    const savedSelectedPath = selectedPath || load("selectedPath")
+    const guide = guideType || load("guideType") || "free"
 
-    if (!profile || !paths) return
+    if (!profile) return
 
-    // Use chosen path first, fall back to best match
-    const chosenPathId = load("selectedPath")
-    const pathId = chosenPathId || paths.best?.[0] || paths.best
+    const chosenPath =
+      savedSelectedPath ||
+      paths?.best?.[0] ||
+      paths?.best ||
+      paths?.[0] ||
+      null
 
-    setPathName(pathId)
+    if (!chosenPath) return
 
-    const generated = buildPrompt(profile, pathId, guide || "free")
+    const displayName =
+      typeof chosenPath === "object"
+        ? chosenPath.name || chosenPath.pathId || "Selected Path"
+        : chosenPath
+
+    setPathName(displayName)
+
+    const generated = buildPrompt(profile, chosenPath, guide)
     setPrompt(generated)
-  }, [])
+  }, [userProfile, recommendedPaths, selectedPath, guideType])
 
   function handleCopy() {
     navigator.clipboard.writeText(prompt).then(() => {
@@ -41,10 +58,19 @@ function PromptGenerator({ userProfile, recommendedPaths, guideType, setCurrentS
     <div style={styles.page}>
       <div style={styles.card}>
         <div style={styles.badge}>STEP 3 OF 4</div>
+
         <h2 style={styles.title}>Your Personalised Prompt is Ready</h2>
+
         <p style={styles.subtitle}>
           This prompt was built specifically from your profile and chosen path.
         </p>
+
+        {pathName && (
+          <div style={styles.pathBox}>
+            <span style={styles.pathLabel}>Selected path</span>
+            <span style={styles.pathValue}>{pathName}</span>
+          </div>
+        )}
 
         <div style={styles.steps}>
           {[
@@ -68,6 +94,7 @@ function PromptGenerator({ userProfile, recommendedPaths, guideType, setCurrentS
               {copied ? "✓ Copied!" : "Copy Prompt"}
             </button>
           </div>
+
           <textarea
             id="prompt-textarea"
             readOnly
@@ -79,6 +106,7 @@ function PromptGenerator({ userProfile, recommendedPaths, guideType, setCurrentS
         <button onClick={() => setCurrentScreen("paste")} style={styles.nextBtn}>
           I Have My AI Response →
         </button>
+
         <button onClick={() => setCurrentScreen("guideSelect")} style={styles.backBtn}>
           ← Back
         </button>
@@ -93,6 +121,9 @@ const styles = {
   badge: { display: "inline-block", background: "#1a1a1a", border: "1px solid #333", color: "#00ff88", fontSize: "11px", fontWeight: "700", letterSpacing: "2px", padding: "4px 10px", borderRadius: "4px", width: "fit-content" },
   title: { color: "#fff", fontSize: "22px", fontWeight: "700", margin: 0 },
   subtitle: { color: "#888", fontSize: "14px", margin: 0, lineHeight: "1.5" },
+  pathBox: { background: "#001a0d", border: "1px solid #00ff88", borderRadius: "8px", padding: "12px 14px", display: "flex", flexDirection: "column", gap: "4px" },
+  pathLabel: { color: "#00ff88", fontSize: "11px", fontWeight: "700", letterSpacing: "1.5px" },
+  pathValue: { color: "#fff", fontSize: "14px", lineHeight: "1.5" },
   steps: { background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: "8px", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "10px" },
   stepRow: { display: "flex", alignItems: "center", gap: "12px" },
   stepNum: { width: "24px", height: "24px", borderRadius: "50%", background: "#00ff88", color: "#000", fontSize: "12px", fontWeight: "700", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },

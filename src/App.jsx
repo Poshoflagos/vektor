@@ -12,6 +12,7 @@ import Tracker from "./components/Tracker"
 import Settings from "./components/Settings"
 import IntroLesson from "./components/IntroLesson"
 import BeginnerIntroPrompt from "./components/BeginnerIntroPrompt"
+import PathDirectory from "./components/PathDirectory"
 import PasswordGate from "./components/PasswordGate"
 
 function App() {
@@ -49,9 +50,24 @@ function App() {
     if (savedPath) setSelectedPath(savedPath)
   }, [])
 
+  function handleLogout() {
+    try {
+      localStorage.removeItem("vektor_access")
+    } catch (error) {
+      console.warn("Could not remove access key:", error)
+    }
+
+    setIsAuthenticated(false)
+    setCurrentScreen("password")
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#0a0a0a" }}>
-      <NavBar currentScreen={currentScreen} onNavigate={setCurrentScreen} />
+      <NavBar
+        currentScreen={currentScreen}
+        onNavigate={setCurrentScreen}
+        onLogout={handleLogout}
+      />
 
       <div
         style={{
@@ -96,6 +112,13 @@ function App() {
           />
         )}
 
+        {currentScreen === "pathDirectory" && (
+          <PathDirectory
+            setCurrentScreen={setCurrentScreen}
+            setSelectedPath={setSelectedPath}
+          />
+        )}
+
         {currentScreen === "guideSelect" && (
           <GuideSelector
             setGuideType={setGuideType}
@@ -104,13 +127,14 @@ function App() {
         )}
 
         {currentScreen === "prompt" && (
-          <PromptGenerator
-            userProfile={userProfile}
-            recommendedPaths={recommendedPaths}
-            guideType={guideType}
-            setCurrentScreen={setCurrentScreen}
-          />
-        )}
+  <PromptGenerator
+    userProfile={userProfile}
+    recommendedPaths={recommendedPaths}
+    selectedPath={selectedPath}
+    guideType={guideType}
+    setCurrentScreen={setCurrentScreen}
+  />
+)}
 
         {currentScreen === "paste" && (
           <PasteResult
@@ -139,9 +163,10 @@ function App() {
         {currentScreen === "introLesson" && (
           <IntroLesson setCurrentScreen={setCurrentScreen} />
         )}
+
         {currentScreen === "introPrompt" && (
-  <BeginnerIntroPrompt setCurrentScreen={setCurrentScreen} />
-)}
+          <BeginnerIntroPrompt setCurrentScreen={setCurrentScreen} />
+        )}
       </div>
     </div>
   )

@@ -1,8 +1,16 @@
 import { AI_WEB3_OPPORTUNITIES } from "../data/paths"
 
-export function buildPrompt(profile, pathId, guideType) {
-  const path = AI_WEB3_OPPORTUNITIES.find(p => p.pathId === pathId)
-  const pathName = path?.name || pathId
+export function buildPrompt(profile, selectedPath, guideType) {
+  const guide = guideType || "free"
+
+  const path =
+    typeof selectedPath === "object" && selectedPath !== null
+      ? selectedPath
+      : AI_WEB3_OPPORTUNITIES.find(p => p.pathId === selectedPath)
+
+  const pathName =
+    path?.name ||
+    (typeof selectedPath === "string" ? selectedPath : "Selected Path")
 
   const guideInstructions = {
     free: "BUDGET RULE: Recommend ONLY completely free resources. No paid courses, no trials that require credit cards, no freemium traps. Every single resource must be accessible with zero money. If you cannot find a free version, say so honestly and suggest the closest free alternative.",
@@ -76,7 +84,7 @@ Experience level: ${profile.experience}
 Natural strengths: ${profile.strengths?.join(", ") || "not specified"}
 Background: ${profile.background || "not provided"}
 Available time: ${hoursText}
-Budget: ${guideType}
+Budget: ${guide}
 Learning style: ${profile.learningStyle}
 
 ${profile.strengths?.length ? `STRENGTHS INSTRUCTION: Their strengths (${profile.strengths.join(", ")}) are not background information — they are the competitive advantage you must design the entire path around. Where can these strengths make them 10x faster than someone starting from zero?` : ""}
@@ -86,7 +94,7 @@ ${profile.background?.length > 10 ? `BACKGROUND INSTRUCTION: "${profile.backgrou
 ═══════════════════════════════════════════════════
 CONSTRAINTS
 ═══════════════════════════════════════════════════
-${guideInstructions[guideType]}
+${guideInstructions[guide] || guideInstructions.free}
 ${urgencyMap[profile.urgency] || ""}
 ${experienceContext[profile.experience] || ""}
 ${learningStyleMap[profile.learningStyle] || ""}
@@ -156,7 +164,7 @@ Phase 5: Earn and Apply
 
 ---SECTION-4-RESOURCES---
 TOP 5 RESOURCES
-Chosen for: ${profile.learningStyle} learning style + ${guideType} budget + ${pathName} path
+Chosen for: ${profile.learningStyle} learning style + ${guide} budget + ${pathName} path
 Format each as:
 RESOURCE NAME:
 URL:
@@ -187,7 +195,7 @@ Tasks must progress logically from foundation to earning. No task should be vagu
 
 ---SECTION-8-FIRST-MONEY---
 FIRST MONEY ROUTE
-How does ${profile.name} — with their background in "${profile.background || "their background"}", ${hoursText}, and ${guideType} budget — make their first $50-$500?
+How does ${profile.name} — with their background in "${profile.background || "their background"}", ${hoursText}, and ${guide} budget — make their first $50-$500?
 Write a numbered sequence. Include:
 - The exact platform or channel to use
 - The exact offer or service to sell

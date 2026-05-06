@@ -3,6 +3,7 @@ import { useState } from "react"
 const NAV_ITEMS = [
   { label: "Home", screen: "welcome", icon: "⌂" },
   { label: "Intro", screen: "introLesson", icon: "◇" },
+  { label: "Paths", screen: "pathDirectory", icon: "⌁" },
   { label: "Reports", screen: "reports", icon: "📋" },
   { label: "Tracker", screen: "tracker", icon: "✓" },
   { label: "Settings", screen: "settings", icon: "⚙" },
@@ -13,7 +14,9 @@ const NAV_ITEMS = [
 const VISIBLE_SCREENS = [
   "welcome",
   "form",
+  "introPrompt",
   "results",
+  "pathDirectory",
   "introLesson",
   "guideSelect",
   "prompt",
@@ -23,13 +26,21 @@ const VISIBLE_SCREENS = [
   "settings"
 ]
 
-export default function NavBar({ currentScreen, onNavigate }) {
+export default function NavBar({ currentScreen, onNavigate, onLogout }) {
   const [open, setOpen] = useState(false)
 
   if (!VISIBLE_SCREENS.includes(currentScreen)) return null
 
   function handleNavigate(screen) {
     onNavigate(screen)
+    setOpen(false)
+  }
+
+  function handleLogout() {
+    if (typeof onLogout === "function") {
+      onLogout()
+    }
+
     setOpen(false)
   }
 
@@ -103,6 +114,12 @@ export default function NavBar({ currentScreen, onNavigate }) {
         {/* Sidebar footer */}
         <div style={styles.sidebarFooter}>
           <div style={styles.sidebarDivider} />
+
+          <button onClick={handleLogout} style={styles.logoutBtn}>
+            <span style={styles.navIcon}>↩</span>
+            <span style={styles.navLabel}>Logout</span>
+          </button>
+
           <p style={styles.footerVersion}>v1.0.0</p>
           <p style={styles.footerText}>Your data stays on your device.</p>
         </div>
@@ -235,6 +252,23 @@ const styles = {
   },
   sidebarFooter: {
     padding: "0 0 24px"
+  },
+  logoutBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    width: "calc(100% - 24px)",
+    margin: "16px 12px 0",
+    padding: "12px 16px",
+    background: "transparent",
+    border: "1px solid #331111",
+    borderRadius: "8px",
+    color: "#ff6666",
+    cursor: "pointer",
+    fontSize: "15px",
+    fontFamily: "monospace",
+    fontWeight: 500,
+    textAlign: "left"
   },
   footerVersion: {
     color: "#333",

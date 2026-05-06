@@ -11,7 +11,7 @@ function Welcome({
   const [feedbackSent, setFeedbackSent] = useState(false)
 
   const name = userProfile?.name || null
-  const pathName = selectedPath?.name || null
+  const pathName = getPathDisplayName(selectedPath)
 
   const reports = Array.isArray(savedReports) ? savedReports : []
   const reportsCount = reports.length
@@ -24,6 +24,9 @@ function Welcome({
 
   const nextTask = tasks.find(task => !task.completed) || null
   const latestReport = reportsCount > 0 ? reports[reports.length - 1] : null
+  const latestReportPathName = latestReport
+    ? getPathDisplayName(latestReport.pathName) || "Saved Guide"
+    : "Saved Guide"
 
   function navigate(screen) {
     if (typeof setCurrentScreen === "function") {
@@ -175,11 +178,11 @@ function Welcome({
           {nextTask ? (
             <>
               <p style={styles.nextStepCategory}>
-                {nextTask.category || "Task"}
+                {formatSafeText(nextTask.category, "Task")}
               </p>
 
               <p style={styles.nextStepTitle}>
-                {nextTask.title || "Untitled task"}
+                {formatSafeText(nextTask.title, "Untitled task")}
               </p>
             </>
           ) : (
@@ -203,12 +206,13 @@ function Welcome({
 
         <div style={styles.quickGrid}>
           {[
-            { label: "Beginner Intro", screen: "introLesson" },
-            { label: "Path Results", screen: "results" },
-            { label: "Saved Reports", screen: "reports" },
-            { label: "Task Tracker", screen: "tracker" },
-            { label: "Update Answers", screen: "form" }
-          ].map(item => (
+  { label: "Beginner Intro", screen: "introLesson" },
+  { label: "Browse Paths", screen: "pathDirectory" },
+  { label: "Path Results", screen: "results" },
+  { label: "Saved Reports", screen: "reports" },
+  { label: "Task Tracker", screen: "tracker" },
+  { label: "Update Answers", screen: "form" }
+].map(item => (
             <button
               key={item.label}
               type="button"
@@ -227,12 +231,12 @@ function Welcome({
           {latestReport ? (
             <>
               <p style={styles.reportPath}>
-                {latestReport.pathName || "Saved Guide"}
+                {latestReportPathName}
               </p>
 
               <p style={styles.reportMeta}>
                 {latestReport.guideType
-                  ? `${capitalize(latestReport.guideType)} guide`
+                  ? `${capitalize(formatSafeText(latestReport.guideType, "Guide"))} guide`
                   : "Guide"}
 
                 {latestReport.date ? ` · ${latestReport.date}` : ""}
@@ -292,6 +296,34 @@ function Welcome({
       </div>
     </div>
   )
+}
+
+function getPathDisplayName(path) {
+  if (!path) return null
+
+  if (typeof path === "string") {
+    return path
+  }
+
+  if (typeof path === "object") {
+    return path.name || path.pathId || "Selected Path"
+  }
+
+  return String(path)
+}
+
+function formatSafeText(value, fallback = "") {
+  if (!value) return fallback
+
+  if (typeof value === "string" || typeof value === "number") {
+    return value
+  }
+
+  if (typeof value === "object") {
+    return value.name || value.title || value.pathId || fallback
+  }
+
+  return String(value)
 }
 
 function capitalize(text) {
