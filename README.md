@@ -1,16 +1,24 @@
-# React + Vite
+ VEKTÖR-V1
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+AI/Web3 career pathfinding tool that helps users identify 
+personalized learning, career, and opportunity paths inside 
+the AI and Web3 economy.
 
-Currently, two official plugins are available:
+ Live Product
+https://vektor-v1.netlify.app
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+ What it does
+- Takes your background, skills, time, urgency, and budget
+- Generates a personalized AI/Web3 path for you
+- Turns scattered interests into a prioritized roadmap
+- Built for people entering AI/Web3 with no clear starting point
 
-## React Compiler
+ Built with
+- React + Vite
+- Deployed on Netlify
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+ V2 Roadmap
+- Supabase authentication and user accounts
+- Gemini API integration for automatic guide generation
+- Cloud storage for saved paths
+- Progress tracking dashboard
