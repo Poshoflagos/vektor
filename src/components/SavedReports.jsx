@@ -1,127 +1,391 @@
-import { useState, useEffect } from "react"
-import { load, deleteReport } from "../logic/storage"
+// src/components/SavedReports.jsx
+import { useEffect, useMemo, useState } from "react";
+import { deleteReport, load } from "../logic/storage";
+import { buildTrackerBundleFromGuide } from "../logic/trackerBuilder";
 
-function SavedReports({ setCurrentScreen }) {
-  const [reports, setReports] = useState([])
-  const [expandedId, setExpandedId] = useState(null)
+function getReportDate(report) {
+  const value = report?.createdAt || report?.savedAt;
 
-  useEffect(() => {
-    const saved = load("reports") || []
-    setReports(saved)
+  if (!value) return report?.date || "Unknown date";
 
-    function handleFocus() {
-      const refreshed = load("reports") || []
-      setReports(refreshed)
-    }
+  const date = new Date(value);
 
-    window.addEventListener("focus", handleFocus)
-    return () => window.removeEventListener("focus", handleFocus)
-  }, [])
-
-  function handleDelete(id) {
-    if (!window.confirm("Delete this report?")) return
-    deleteReport(id)
-    setReports(prev => prev.filter(r => r.id !== id))
+  if (Number.isNaN(date.getTime())) {
+    return report?.date || "Unknown date";
   }
 
-  function toggleExpand(id) {
-    setExpandedId(prev => prev === id ? null : id)
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function getReportTitle(report) {
+  return report?.title || report?.pathName || report?.recommendedPath || "Untitled VEKTÖR Report";
+}
+
+function getReportPath(report) {
+  return report?.recommendedPath || report?.pathName || "Unknown Path";
+}
+
+function getGuidePhases(report) {
+  return Array.isArray(report?.parsedGuide?.phases) ? report.parsedGuide.phases : [];
+}
+
+function getPhaseTitle(phase, index) {
+  return phase?.phaseTitle || phase?.title || `Phase ${index + 1}`;
+}
+
+function getWeeks(phase) {
+  return Array.isArray(phase?.weeks) ? phase.weeks : [];
+}
+
+function getTasks(week) {
+  return Array.isArray(week?.tasks) ? week.tasks : [];
+}
+
+function getTotalTasks(report) {
+  return getGuidePhases(report).reduce((phaseTotal, phase) => {
+    return (
+      phaseTotal +
+      getWeeks(phase).reduce((weekTotal, week) => weekTotal + getTasks(week).length, 0)
+    );
+  }, 0);
+}
+
+function sortReports(reports, sortMode) {
+  const copy = [...reports];
+
+  if (sortMode === "oldest") {
+    return copy.sort((a, b) => {
+      const aTime = new Date(a.createdAt || a.savedAt || 0).getTime();
+      const bTime = new Date(b.createdAt || b.savedAt || 0).getTime();
+
+      return aTime - bTime;
+    });
+  }
+
+  if (sortMode === "path") {
+    return copy.sort((a, b) => getReportPath(a).localeCompare(getReportPath(b)));
+  }
+
+  return copy.sort((a, b) => {
+    const aTime = new Date(a.createdAt || a.savedAt || 0).getTime();
+    const bTime = new Date(b.createdAt || b.savedAt || 0).getTime();
+
+    return bTime - aTime;
+  });
+}
+
+export default function SavedReports({
+  setCurrentScreen,
+  savedReports,
+  setSavedReports,
+  activeReportId,
+  setActiveReportId,
+  setActiveGuide,
+  setTrackerData,
+  setTrackerProgress,
+}) {
+  const [localReports, setLocalReports] = useState([]);
+  const [expandedId, setExpandedId] = useState(null);
+  const [deletePendingId, setDeletePendingId] = useState(null);
+  const [sortMode, setSortMode] = useState("newest");
+  const [status, setStatus] = useState({
+    type: "idle",
+    message: "",
+  });
+
+  const reports = Array.isArray(savedReports) ? savedReports : localReports;
+
+  useEffect(() => {
+    if (Array.isArray(savedReports)) return;
+
+    const loadedReports = load("reports", []) || [];
+    setLocalReports(Array.isArray(loadedReports) ? loadedReports : []);
+  }, [savedReports]);
+
+  const sortedReports = useMemo(() => sortReports(reports, sortMode), [reports, sortMode]);
+
+  const activeReport = reports.find((report) => report.id === activeReportId) || null;
+
+  function updateReports(nextReports) {
+    if (typeof setSavedReports === "function") {
+      setSavedReports(nextReports);
+      return;
+    }
+
+    setLocalReports(nextReports);
+  }
+
+  function toggleExpand(reportId) {
+    setExpandedId((currentId) => (currentId === reportId ? null : reportId));
+    setDeletePendingId(null);
+    setStatus({
+      type: "idle",
+      message: "",
+    });
+  }
+
+  function requestDelete(reportId) {
+    if (deletePendingId !== reportId) {
+      setDeletePendingId(reportId);
+      setStatus({
+        type: "warning",
+        message: "Click Confirm Delete to remove this report.",
+      });
+      return;
+    }
+
+    const nextReports = deleteReport(reportId);
+    updateReports(nextReports);
+
+    if (activeReportId === reportId) {
+      if (typeof setActiveReportId === "function") setActiveReportId(null);
+      if (typeof setActiveGuide === "function") setActiveGuide(null);
+      if (typeof setTrackerData === "function") setTrackerData(null);
+      if (typeof setTrackerProgress === "function") setTrackerProgress({});
+    }
+
+    if (expandedId === reportId) {
+      setExpandedId(null);
+    }
+
+    setDeletePendingId(null);
+    setStatus({
+      type: "success",
+      message: "Report deleted.",
+    });
+  }
+
+  function makeReportActive(report) {
+    if (!report?.parsedGuide) {
+      setStatus({
+        type: "error",
+        message: "This report has no structured guide data. Paste a VEKTOR_GUIDE_V1 report to build a tracker.",
+      });
+      return;
+    }
+
+    const trackerBundle = buildTrackerBundleFromGuide(report.parsedGuide, {
+      sourceReportId: report.id,
+    });
+
+    const trackerWithSource = {
+      ...trackerBundle.trackerData,
+      sourceReportId: report.id,
+    };
+
+    if (typeof setActiveReportId === "function") setActiveReportId(report.id);
+    if (typeof setActiveGuide === "function") setActiveGuide(report.parsedGuide);
+    if (typeof setTrackerData === "function") setTrackerData(trackerWithSource);
+    if (typeof setTrackerProgress === "function") setTrackerProgress(trackerBundle.trackerProgress);
+
+    setStatus({
+      type: "success",
+      message: "Report is now the active tracker source.",
+    });
   }
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-
-        <div style={styles.header}>
+    <section className="page-container stack" aria-label="Saved reports">
+      <header className="page-header">
+        <p className="page-kicker">Archive</p>
+        <div className="row-between">
           <div>
-            <h2 style={styles.title}>Saved Reports</h2>
-            <p style={styles.subtitle}>{reports.length} report{reports.length !== 1 ? "s" : ""} saved</p>
+            <h1>Saved Reports</h1>
+            <p>
+              {reports.length} report{reports.length === 1 ? "" : "s"} saved.
+              {activeReport ? ` Active: ${getReportTitle(activeReport)}` : ""}
+            </p>
           </div>
-          <button onClick={() => setCurrentScreen("welcome")} style={styles.homeBtn}>
-            ← Home
+
+          <button type="button" onClick={() => setCurrentScreen("welcome")}>
+            ← Dashboard
           </button>
         </div>
+      </header>
 
-        {reports.length === 0 ? (
-          <div style={styles.emptyBox}>
-            <p style={styles.emptyText}>No reports yet.</p>
-            <p style={styles.emptySubtext}>Complete the full flow to generate and save your first guide.</p>
-            <button onClick={() => setCurrentScreen("form")} style={styles.startBtn}>
-              Start My Path →
+      {status.message && (
+        <div className={`status-message ${status.type}`} role={status.type === "error" ? "alert" : "status"}>
+          {status.message}
+        </div>
+      )}
+
+      {reports.length > 0 && (
+        <section className="card row-between" aria-label="Report controls">
+          <div>
+            <p className="page-kicker">Sort</p>
+            <h2>Report Library</h2>
+          </div>
+
+          <div className="actions">
+            <button
+              type="button"
+              className={sortMode === "newest" ? "primary" : "secondary"}
+              onClick={() => setSortMode("newest")}
+            >
+              Newest
+            </button>
+            <button
+              type="button"
+              className={sortMode === "oldest" ? "primary" : "secondary"}
+              onClick={() => setSortMode("oldest")}
+            >
+              Oldest
+            </button>
+            <button
+              type="button"
+              className={sortMode === "path" ? "primary" : "secondary"}
+              onClick={() => setSortMode("path")}
+            >
+              By Path
             </button>
           </div>
-        ) : (
-          <div style={styles.list}>
-            {[...reports].reverse().map(report => (
-              <div key={report.id} style={styles.reportCard}>
+        </section>
+      )}
 
-                <div style={styles.reportHeader}>
-                  <div style={styles.reportMeta}>
-                    <span style={styles.reportPath}>{report.pathName}</span>
-                    <span style={styles.reportBadge}>{report.guideType}</span>
+      {reports.length === 0 ? (
+        <section className="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M7 3h7l5 5v13H7V3Z"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+            <path
+              d="M14 3v5h5M9.5 13h7M9.5 16h5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+          </svg>
+          <h2>No saved reports yet</h2>
+          <p>
+            Paste a valid VEKTÖR guide and it will appear here with a tracker-ready structure.
+          </p>
+          <button type="button" className="primary" onClick={() => setCurrentScreen("paste")}>
+            Paste Guide →
+          </button>
+        </section>
+      ) : (
+        <section className="reports-grid">
+          {sortedReports.map((report) => {
+            const isExpanded = expandedId === report.id;
+            const isActive = activeReportId === report.id;
+            const phases = getGuidePhases(report);
+            const totalTasks = getTotalTasks(report);
+            const hasStructuredGuide = Boolean(report.parsedGuide);
+
+            return (
+              <article
+                key={report.id}
+                className={`report-card stack ${isActive ? "active" : ""}`}
+              >
+                <div className="row-between">
+                  <div>
+                    <p className="page-kicker">{getReportDate(report)}</p>
+                    <h2>{getReportTitle(report)}</h2>
                   </div>
-                  <span style={styles.reportDate}>{report.date}</span>
+
+                  {isActive && <span className="badge active">Active</span>}
                 </div>
 
-                <div style={styles.reportActions}>
-                  <button
-                    onClick={() => toggleExpand(report.id)}
-                    style={styles.expandBtn}
-                  >
-                    {expandedId === report.id ? "Hide Guide ▲" : "Read Guide ▼"}
+                <div className="report-meta">
+                  <span className="badge">{getReportPath(report)}</span>
+                  <span className="badge">{phases.length} phases</span>
+                  <span className="badge">{totalTasks} tasks</span>
+                  {!hasStructuredGuide && <span className="badge">Legacy</span>}
+                </div>
+
+                <div className="actions">
+                  <button type="button" onClick={() => toggleExpand(report.id)}>
+                    {isExpanded ? "Close View" : "View"}
                   </button>
+
                   <button
-                    onClick={() => handleDelete(report.id)}
-                    style={styles.deleteBtn}
+                    type="button"
+                    className={isActive ? "secondary" : "primary"}
+                    onClick={() => makeReportActive(report)}
+                    disabled={!hasStructuredGuide}
                   >
-                    Delete
+                    {isActive ? "Active Tracker" : "Make Active"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => requestDelete(report.id)}
+                  >
+                    {deletePendingId === report.id ? "Confirm Delete" : "Delete"}
                   </button>
                 </div>
 
-                {expandedId === report.id && (
-                  <div style={styles.reportContent}>
-                    <pre style={styles.reportText}>{report.content}</pre>
+                {isExpanded && (
+                  <div className="report-expanded stack">
+                    <div>
+                      <p className="page-kicker">Report Summary</p>
+                      <p>
+                        Path: <span className="text-accent">{getReportPath(report)}</span>
+                      </p>
+                      <p>
+                        Created: <span>{getReportDate(report)}</span>
+                      </p>
+                      <p>
+                        Total tasks: <span>{totalTasks}</span>
+                      </p>
+                    </div>
+
+                    {hasStructuredGuide ? (
+                      <div className="stack">
+                        {phases.map((phase, phaseIndex) => {
+                          const weeks = getWeeks(phase);
+                          const phaseTaskCount = weeks.reduce(
+                            (total, week) => total + getTasks(week).length,
+                            0
+                          );
+
+                          return (
+                            <div className="notice-card" key={phase.phaseId || phase.id || phaseIndex}>
+                              <div className="row-between">
+                                <h3>{getPhaseTitle(phase, phaseIndex)}</h3>
+                                <span className="badge">{phaseTaskCount} tasks</span>
+                              </div>
+
+                              <div className="stack">
+                                {weeks.map((week, weekIndex) => (
+                                  <div
+                                    className="row-between"
+                                    key={week.weekId || week.id || weekIndex}
+                                  >
+                                    <span>
+                                      {week.weekTitle || week.title || `Week ${weekIndex + 1}`}
+                                    </span>
+                                    <span className="badge">{getTasks(week).length} tasks</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="status-message warning">
+                        This is a legacy text report. It can be viewed in old storage, but it cannot
+                        rebuild a hierarchical tracker unless it is regenerated with VEKTOR_GUIDE_V1.
+                      </div>
+                    )}
+
+                    <button type="button" onClick={() => setExpandedId(null)}>
+                      Close
+                    </button>
                   </div>
                 )}
-
-              </div>
-            ))}
-          </div>
-        )}
-
-        <button onClick={() => setCurrentScreen("tracker")} style={styles.trackerBtn}>
-          Go to My Tracker →
-        </button>
-
-      </div>
-    </div>
-  )
+              </article>
+            );
+          })}
+        </section>
+      )}
+    </section>
+  );
 }
-
-const styles = {
-  page: { minHeight: "100vh", background: "#0a0a0a", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px 16px", fontFamily: "'Segoe UI', sans-serif" },
-  card: { width: "100%", maxWidth: "720px", background: "#111", border: "1px solid #222", borderRadius: "12px", padding: "36px 32px", display: "flex", flexDirection: "column", gap: "24px" },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" },
-  title: { color: "#fff", fontSize: "22px", fontWeight: "700", margin: 0 },
-  subtitle: { color: "#555", fontSize: "13px", marginTop: "4px" },
-  homeBtn: { padding: "8px 16px", background: "transparent", border: "1px solid #333", borderRadius: "6px", color: "#666", fontSize: "13px", cursor: "pointer" },
-  emptyBox: { background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: "10px", padding: "40px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" },
-  emptyText: { color: "#fff", fontSize: "16px", fontWeight: "600", margin: 0 },
-  emptySubtext: { color: "#555", fontSize: "13px", margin: 0 },
-  startBtn: { padding: "12px 24px", background: "#00ff88", border: "none", borderRadius: "8px", color: "#000", fontSize: "14px", fontWeight: "700", cursor: "pointer", marginTop: "8px" },
-  list: { display: "flex", flexDirection: "column", gap: "16px" },
-  reportCard: { background: "#0f0f0f", border: "1px solid #222", borderRadius: "10px", overflow: "hidden" },
-  reportHeader: { padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #1a1a1a" },
-  reportMeta: { display: "flex", alignItems: "center", gap: "10px" },
-  reportPath: { color: "#fff", fontSize: "14px", fontWeight: "600" },
-  reportBadge: { padding: "3px 8px", background: "#1a1a1a", border: "1px solid #333", borderRadius: "4px", color: "#00ff88", fontSize: "11px", fontWeight: "700", textTransform: "uppercase" },
-  reportDate: { color: "#555", fontSize: "12px" },
-  reportActions: { padding: "12px 20px", display: "flex", gap: "10px", borderBottom: "1px solid #1a1a1a" },
-  expandBtn: { padding: "7px 14px", background: "#1a1a1a", border: "1px solid #333", borderRadius: "6px", color: "#ccc", fontSize: "12px", cursor: "pointer" },
-  deleteBtn: { padding: "7px 14px", background: "transparent", border: "1px solid #440000", borderRadius: "6px", color: "#ff4444", fontSize: "12px", cursor: "pointer" },
-  reportContent: { padding: "20px", borderTop: "1px solid #1a1a1a" },
-  reportText: { color: "#bbb", fontSize: "13px", lineHeight: "1.8", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontFamily: "'Segoe UI', sans-serif" },
-  trackerBtn: { padding: "14px", background: "#00ff88", border: "none", borderRadius: "8px", color: "#000", fontSize: "15px", fontWeight: "700", cursor: "pointer", width: "100%" }
-}
-
-export default SavedReports

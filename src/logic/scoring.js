@@ -48,7 +48,9 @@ function mapProfile(profile) {
     prefers: profile.budget === "free" ? ["freelance", "creator", "research"] : ["freelance", "startup", "career"],
     avoids: [],
     needsBeginnerFriendly: profile.experience === "beginner" || profile.experience === "some",
-    riskTolerance: profile.urgency === "very" ? "Low" : profile.urgency === "longterm" ? "High" : "Medium"
+    riskTolerance: profile.urgency === "very" ? "Low" : profile.urgency === "longterm" ? "High" : "Medium",
+    // FIX: add raw interest field for the filter in paths.js
+    interest: profile.interest || ""
   }
 }
 

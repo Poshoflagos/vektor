@@ -1,137 +1,174 @@
-// BeginnerIntroPrompt.jsx
-// Shows after onboarding if user selected beginner level
-
-function BeginnerIntroPrompt({ setCurrentScreen }) {
-  function startIntro() {
-    try {
-      localStorage.setItem("vektor_hasSeenIntro", JSON.stringify(true))
-    } catch (error) {
-      console.warn("Could not save intro status:", error)
+// src/components/BeginnerIntroPrompt.jsx
+export default function BeginnerIntroPrompt({ setCurrentScreen, setHasSeenIntro }) {
+  function markIntroDecision() {
+    if (typeof setHasSeenIntro === "function") {
+      setHasSeenIntro(true);
     }
-
-    setCurrentScreen("introLesson")
   }
 
-  function skipIntro() {
-    try {
-      localStorage.setItem("vektor_hasSeenIntro", JSON.stringify(false))
-    } catch (error) {
-      console.warn("Could not save intro status:", error)
-    }
+  function skipToVektor() {
+    markIntroDecision();
+    setCurrentScreen("form");
+  }
 
-    setCurrentScreen("results")
+  function openBeginnerIntro() {
+    markIntroDecision();
+    setCurrentScreen("introLesson");
   }
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        <p style={styles.kicker}>BEGINNER MODE</p>
+    <div className="intro-modal-overlay">
+      <div className="intro-modal-card">
+        <div className="intro-modal-accent" />
+        <div className="intro-modal-content">
+          <h1 className="intro-modal-title">Welcome to VEKTÖR</h1>
+          <p className="intro-modal-body">
+            VEKTÖR helps you find a realistic AI/Web3 path, generate a structured
+            execution guide, and turn that guide into a tracker you can follow.
+          </p>
 
-        <h1 style={styles.title}>Want a quick intro first?</h1>
+          <div className="intro-modal-subsection">
+            <h2 className="intro-modal-subtitle">First time here?</h2>
+            <p className="intro-modal-text">
+              Take a short beginner intro before starting, or skip straight to the VEKTÖR interview.
+            </p>
+          </div>
 
-        <p style={styles.text}>
-          You selected beginner level. Before showing your path results, VEKTÖR
-          can give you a simple explanation of AI, Web3, the opportunities in
-          both, and why 2026 is still early enough to start seriously.
-        </p>
+          <div className="intro-modal-steps">
+            <div className="intro-modal-step">1. Answer the VEKTÖR interview questions.</div>
+            <div className="intro-modal-step">2. Get matched with realistic AI/Web3 paths.</div>
+            <div className="intro-modal-step">3. Generate a prompt for ChatGPT, Claude, or Gemini.</div>
+            <div className="intro-modal-step">4. Paste the guide back into VEKTÖR to build your tracker.</div>
+          </div>
 
-        <div style={styles.notice}>
-          This is optional. If you already understand the basics, you can skip it
-          and go straight to your path results.
-        </div>
-
-        <div style={styles.buttonRow}>
-          <button onClick={skipIntro} style={styles.secondaryButton}>
-            Skip — Show My Results
-          </button>
-
-          <button onClick={startIntro} style={styles.primaryButton}>
-            Yes — Teach Me First
-          </button>
+          <div className="intro-modal-buttons">
+            <button className="intro-modal-btn secondary" onClick={skipToVektor}>
+              Skip to VEKTÖR
+            </button>
+            <button className="intro-modal-btn primary" onClick={openBeginnerIntro}>
+              Show Beginner Intro
+            </button>
+          </div>
         </div>
       </div>
+
+      <style>{`
+        .intro-modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.85);
+          backdrop-filter: blur(4px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 1rem;
+        }
+        .intro-modal-card {
+          max-width: 680px;
+          width: 100%;
+          background: var(--color-surface, #161616);
+          border-radius: 12px;
+          overflow: hidden;
+          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+          animation: fadeInUp 0.2s ease-out;
+        }
+        .intro-modal-accent {
+          height: 4px;
+          background: var(--color-accent, #00FF85);
+        }
+        .intro-modal-content {
+          padding: 2rem;
+        }
+        .intro-modal-title {
+          font-family: 'Courier New', 'Fira Code', monospace;
+          font-size: 1.875rem;
+          font-weight: 700;
+          color: var(--color-accent, #00FF85);
+          margin: 0 0 1rem 0;
+        }
+        .intro-modal-body {
+          font-family: 'Courier New', monospace;
+          font-size: 1rem;
+          line-height: 1.5;
+          color: var(--color-text-primary, #F0F0F0);
+          margin: 0 0 1.5rem 0;
+        }
+        .intro-modal-subsection {
+          margin-bottom: 1.5rem;
+        }
+        .intro-modal-subtitle {
+          font-family: 'Courier New', monospace;
+          font-size: 1.125rem;
+          font-weight: 600;
+          color: var(--color-accent, #00FF85);
+          margin: 0 0 0.5rem 0;
+        }
+        .intro-modal-text {
+          font-family: 'Courier New', monospace;
+          font-size: 0.875rem;
+          color: var(--color-text-secondary, #A0A0A0);
+          margin: 0;
+        }
+        .intro-modal-steps {
+          margin-bottom: 2rem;
+          padding-left: 1.25rem;
+        }
+        .intro-modal-step {
+          font-family: 'Courier New', monospace;
+          font-size: 0.875rem;
+          line-height: 1.6;
+          color: var(--color-text-primary, #F0F0F0);
+          margin-bottom: 0.5rem;
+        }
+        .intro-modal-buttons {
+          display: flex;
+          gap: 1rem;
+          justify-content: flex-end;
+          flex-wrap: wrap;
+        }
+        .intro-modal-btn {
+          font-family: 'Courier New', monospace;
+          font-size: 0.875rem;
+          font-weight: 500;
+          padding: 0.625rem 1.5rem;
+          border-radius: 6px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          border: none;
+          background: none;
+        }
+        .intro-modal-btn.primary {
+          background: var(--color-accent, #00FF85);
+          color: #0a0a0a;
+        }
+        .intro-modal-btn.primary:hover {
+          background: #00cc6a;
+          transform: translateY(-1px);
+        }
+        .intro-modal-btn.secondary {
+          background: transparent;
+          color: var(--color-accent, #00FF85);
+          border: 1px solid var(--color-accent, #00FF85);
+        }
+        .intro-modal-btn.secondary:hover {
+          background: rgba(0, 255, 133, 0.1);
+          transform: translateY(-1px);
+        }
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @media (max-width: 640px) {
+          .intro-modal-content { padding: 1.5rem; }
+          .intro-modal-title { font-size: 1.5rem; }
+          .intro-modal-buttons { flex-direction: column-reverse; }
+          .intro-modal-btn { width: 100%; text-align: center; }
+        }
+      `}</style>
     </div>
-  )
+  );
 }
-
-const styles = {
-  page: {
-    minHeight: "100vh",
-    background: "#0a0a0a",
-    color: "#fff",
-    fontFamily: "'Courier New', monospace",
-    padding: "86px 20px 70px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    boxSizing: "border-box"
-  },
-  card: {
-    width: "100%",
-    maxWidth: "560px",
-    background: "#111",
-    border: "1px solid #222",
-    borderRadius: "14px",
-    padding: "32px",
-    boxSizing: "border-box"
-  },
-  kicker: {
-    color: "#00ff88",
-    fontSize: "12px",
-    letterSpacing: "2px",
-    margin: "0 0 12px"
-  },
-  title: {
-    color: "#fff",
-    fontSize: "30px",
-    lineHeight: "1.2",
-    margin: "0 0 16px"
-  },
-  text: {
-    color: "#aaa",
-    fontSize: "14px",
-    lineHeight: "1.8",
-    margin: "0 0 20px"
-  },
-  notice: {
-    background: "#1a1200",
-    border: "1px solid #3a2800",
-    color: "#aa8800",
-    fontSize: "13px",
-    lineHeight: "1.6",
-    padding: "14px",
-    borderRadius: "10px",
-    marginBottom: "24px"
-  },
-  buttonRow: {
-    display: "flex",
-    gap: "12px",
-    flexWrap: "wrap"
-  },
-  primaryButton: {
-    background: "#00ff88",
-    color: "#000",
-    border: "none",
-    borderRadius: "8px",
-    padding: "14px 18px",
-    fontSize: "14px",
-    fontWeight: "bold",
-    cursor: "pointer",
-    flex: 1,
-    minWidth: "210px"
-  },
-  secondaryButton: {
-    background: "transparent",
-    color: "#888",
-    border: "1px solid #333",
-    borderRadius: "8px",
-    padding: "14px 18px",
-    fontSize: "14px",
-    fontWeight: "bold",
-    cursor: "pointer",
-    flex: 1,
-    minWidth: "210px"
-  }
-}
-
-export default BeginnerIntroPrompt

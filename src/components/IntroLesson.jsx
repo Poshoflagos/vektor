@@ -2,7 +2,7 @@
 // Beginner education screen for VEKTÖR v1
 
 function IntroLesson({ setCurrentScreen, onIntroComplete = null }) {
-  function continueToResults() {
+  function continueToForm() {
     try {
       localStorage.setItem("vektor_hasSeenIntro", JSON.stringify(true))
     } catch (error) {
@@ -13,7 +13,7 @@ function IntroLesson({ setCurrentScreen, onIntroComplete = null }) {
       onIntroComplete()
     }
 
-    setCurrentScreen("results")
+    setCurrentScreen("form")   // FIXED: was "results", now goes to onboarding form
   }
 
   function goHome() {
@@ -191,8 +191,8 @@ function IntroLesson({ setCurrentScreen, onIntroComplete = null }) {
             Back Home
           </button>
 
-          <button onClick={continueToResults} style={styles.primaryButton}>
-            Continue to My Path Results →
+          <button onClick={continueToForm} style={styles.primaryButton}>
+            Continue to VEKTÖR Interview →
           </button>
         </div>
       </div>

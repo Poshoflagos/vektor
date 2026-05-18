@@ -1,129 +1,427 @@
-import { useState } from "react"
-import { saveReport, load, save } from "../logic/storage"
-import { parseTasksFromAIResult } from "../logic/trackerData"
+// src/components/PasteResult.jsx
+import { useMemo, useState } from "react";
+import { createReport, upsertReport } from "../logic/storage";
+import { validateVektorGuide } from "../logic/guideValidator";
+import { parseVektorGuide, getParsedGuideStats } from "../logic/guideParser";
+import { buildTrackerBundleFromGuide } from "../logic/trackerBuilder";
 
-function PasteResult({ recommendedPaths, guideType, setCurrentScreen, setSavedReports }) {
-  const [aiText, setAiText] = useState("")
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState("")
+const MIN_PROCESSING_MS = 220;
 
-  function handleSave() {
-    if (aiText.trim().length < 100) {
-      setError("That looks too short. Paste the full AI response before saving.")
-      return
+function getTodayKey(value) {
+  const date = value ? new Date(value) : new Date();
+
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toLocaleDateString("en-CA");
+  }
+
+  return date.toLocaleDateString("en-CA");
+}
+
+function getReportContent(report) {
+  return String(report?.rawOutput || report?.content || "").trim();
+}
+
+function hasDuplicateFromToday(savedReports = [], text = "", title = "") {
+  const today = new Date().toLocaleDateString("en-CA");
+  const incomingText = String(text || "").trim();
+
+  return savedReports.find((report) => {
+    const reportDate = getTodayKey(report.createdAt || report.savedAt);
+    const sameDay = reportDate === today;
+    const sameContent = getReportContent(report) === incomingText;
+    const sameTitle = title && report.title === title;
+
+    return sameDay && (sameContent || sameTitle);
+  });
+}
+
+function getSelectedPathName({ selectedPath, recommendedPaths }) {
+  if (selectedPath?.title || selectedPath?.name) {
+    return selectedPath.title || selectedPath.name;
+  }
+
+  if (typeof selectedPath === "string") {
+    return selectedPath;
+  }
+
+  if (Array.isArray(recommendedPaths) && recommendedPaths[0]) {
+    return recommendedPaths[0].title || recommendedPaths[0].name || "Selected Path";
+  }
+
+  if (recommendedPaths?.best?.[0]) {
+    const best = recommendedPaths.best[0];
+
+    if (typeof best === "object") {
+      return best.title || best.name || best.pathId || "Selected Path";
     }
 
-    const paths = recommendedPaths || load("paths")
-    const guide = guideType || load("guideType")
-    const selectedPathId = load("selectedPath")
-    const bestPathId = selectedPathId || paths?.best?.[0] || paths?.best || "Unknown Path"
+    return best;
+  }
 
-    // Save the report
-    const report = saveReport(bestPathId, guide || "free", aiText.trim())
+  return "Selected Path";
+}
 
-    if (setSavedReports) {
-      setSavedReports(prev => [...(prev || []), report])
+export default function PasteResult({
+  recommendedPaths,
+  selectedPath,
+  guideType,
+  setCurrentScreen,
+  savedReports = [],
+  setSavedReports,
+  pastedOutput = "",
+  setPastedOutput,
+  setActiveGuide,
+  setActiveReportId,
+  setTrackerData,
+  setTrackerProgress,
+}) {
+  const [localText, setLocalText] = useState(pastedOutput || "");
+  const [validationResult, setValidationResult] = useState(null);
+  const [parsedGuide, setParsedGuide] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [status, setStatus] = useState({
+    type: "idle",
+    message: "",
+    details: [],
+  });
+  const [duplicateReport, setDuplicateReport] = useState(null);
+  const [successSummary, setSuccessSummary] = useState(null);
+
+  const charCount = localText.length;
+
+  const parsedStats = useMemo(() => {
+    if (!parsedGuide) {
+      return {
+        phaseCount: 0,
+        weekCount: 0,
+        taskCount: 0,
+      };
     }
 
-    // Parse tasks from AI response and save to tracker
-    const tasks = parseTasksFromAIResult(aiText)
-    if (tasks.length > 0) {
-      save("tracker", {
-        pathName: bestPathId,
-        tasks
-      })
+    return getParsedGuideStats(parsedGuide);
+  }, [parsedGuide]);
+
+  function updateText(value) {
+    setLocalText(value);
+
+    if (typeof setPastedOutput === "function") {
+      setPastedOutput(value);
     }
 
-    setSaved(true)
-    setError("")
+    setValidationResult(null);
+    setParsedGuide(null);
+    setDuplicateReport(null);
+    setSuccessSummary(null);
+    setStatus({
+      type: "idle",
+      message: "",
+      details: [],
+    });
+  }
 
-    setTimeout(() => {
-      setCurrentScreen("reports")
-    }, 1500)
+  function validateAndParseGuide() {
+    const text = localText.trim();
+    const validation = validateVektorGuide(text);
+
+    setValidationResult(validation);
+
+    if (!validation.valid) {
+      setParsedGuide(null);
+      setDuplicateReport(null);
+      setStatus({
+        type: "error",
+        message: validation.message,
+        details: validation.details || [],
+      });
+      return null;
+    }
+
+    const parsed = parseVektorGuide(text);
+
+    if (!parsed.success) {
+      setParsedGuide(null);
+      setDuplicateReport(null);
+      setStatus({
+        type: "error",
+        message: "The guide marker is present, but the tracker JSON is invalid.",
+        details: [parsed.error],
+      });
+      return null;
+    }
+
+    const duplicate = hasDuplicateFromToday(
+      savedReports,
+      text,
+      parsed.data.guideTitle
+    );
+
+    setParsedGuide(parsed.data);
+    setDuplicateReport(duplicate || null);
+
+    setStatus({
+      type: duplicate ? "warning" : "success",
+      message: duplicate
+        ? "Valid guide detected, but a similar report already exists from today."
+        : "Valid VEKTÖR guide detected. Ready to save.",
+      details: duplicate
+        ? ["Submitting again will not create a duplicate report. The existing report will remain active."]
+        : validation.warnings || [],
+    });
+
+    return parsed.data;
+  }
+
+  function handleValidate() {
+    validateAndParseGuide();
+  }
+
+  function handleSubmit() {
+    const text = localText.trim();
+
+    if (!text) {
+      setStatus({
+        type: "error",
+        message: "Paste the full VEKTÖR guide before submitting.",
+        details: [],
+      });
+      return;
+    }
+
+    setIsProcessing(true);
+    setStatus({
+      type: "info",
+      message: "Validating and building your tracker...",
+      details: [],
+    });
+
+    window.setTimeout(() => {
+      const guide = parsedGuide || validateAndParseGuide();
+
+      if (!guide) {
+        setIsProcessing(false);
+        return;
+      }
+
+      const trackerBundle = buildTrackerBundleFromGuide(guide);
+      const report = createReport({
+        title: guide.guideTitle,
+        recommendedPath:
+          guide.recommendedPath ||
+          getSelectedPathName({ selectedPath, recommendedPaths }),
+        pathName: getSelectedPathName({ selectedPath, recommendedPaths }),
+        guideType: guideType || "VEKTOR_GUIDE_V1",
+        content: text,
+        rawOutput: text,
+        parsedGuide: guide,
+        trackerSummary: trackerBundle.trackerSummary,
+      });
+
+      const reportResult = upsertReport(report);
+      const activeReport = reportResult.report;
+      const trackerWithSource = {
+        ...trackerBundle.trackerData,
+        sourceReportId: activeReport.id,
+      };
+
+      if (typeof setSavedReports === "function") {
+        setSavedReports(reportResult.reports);
+      }
+
+      if (typeof setActiveGuide === "function") {
+        setActiveGuide(guide);
+      }
+
+      if (typeof setActiveReportId === "function") {
+        setActiveReportId(activeReport.id);
+      }
+
+      if (typeof setTrackerData === "function") {
+        setTrackerData(trackerWithSource);
+      }
+
+      if (typeof setTrackerProgress === "function") {
+        setTrackerProgress(trackerBundle.trackerProgress);
+      }
+
+      setLocalText("");
+
+      if (typeof setPastedOutput === "function") {
+        setPastedOutput("");
+      }
+
+      setSuccessSummary({
+        title: guide.guideTitle,
+        path: guide.recommendedPath,
+        phaseCount: trackerBundle.trackerSummary.phaseCount,
+        weekCount: trackerBundle.trackerSummary.weekCount,
+        taskCount: trackerBundle.trackerSummary.taskCount,
+        duplicate: reportResult.duplicate,
+      });
+
+      setStatus({
+        type: reportResult.duplicate ? "warning" : "success",
+        message: reportResult.duplicate
+          ? "This guide was already saved today. The existing report has been used."
+          : "Report saved. Tracker built successfully.",
+        details: [],
+      });
+
+      setDuplicateReport(reportResult.duplicate ? activeReport : null);
+      setIsProcessing(false);
+    }, MIN_PROCESSING_MS);
   }
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
+    <section className="page-container stack" aria-label="Paste VEKTÖR guide">
+      <header className="page-header">
+        <p className="page-kicker">Step 4 of 4</p>
+        <h1>Paste Your VEKTÖR Guide</h1>
+        <p>
+          Paste the full response from ChatGPT, Claude, or Gemini. VEKTÖR will
+          only accept a valid <span className="text-accent">VEKTOR_GUIDE_V1</span>{" "}
+          output with structured tracker JSON.
+        </p>
+      </header>
 
-        <div style={styles.badge}>STEP 4 OF 4</div>
-        <h2 style={styles.title}>Paste Your AI Guide Here</h2>
-        <p style={styles.subtitle}>
-          Go to ChatGPT or Claude, copy the full response, and paste it below. Then click Save.
+      <section className="card stack">
+        <h2>External LLM Flow</h2>
+
+        <div className="stack">
+          <div className="row">
+            <span className="badge">1</span>
+            <span>Open ChatGPT, Claude, or Gemini in another tab.</span>
+          </div>
+          <div className="row">
+            <span className="badge">2</span>
+            <span>Paste the VEKTÖR prompt you copied and generate the guide.</span>
+          </div>
+          <div className="row">
+            <span className="badge">3</span>
+            <span>Copy the full response starting from VEKTOR_GUIDE_V1.</span>
+          </div>
+          <div className="row">
+            <span className="badge">4</span>
+            <span>Paste it below, validate it, then submit.</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="card stack">
+        <div className="row-between">
+          <label htmlFor="vektorGuidePaste">Your VEKTÖR Guide</label>
+          <span className="badge">{charCount} characters</span>
+        </div>
+
+        <textarea
+          id="vektorGuidePaste"
+          value={localText}
+          onChange={(event) => updateText(event.target.value)}
+          placeholder="Paste the full VEKTOR_GUIDE_V1 output here..."
+          aria-describedby="pasteGuideHelp"
+        />
+
+        <p id="pasteGuideHelp" className="muted">
+          Random notes, incomplete LLM replies, or guides without TRACKER_JSON
+          will be rejected.
         </p>
 
-        <div style={styles.instructions}>
-          {[
-            "Open ChatGPT or Claude in another tab",
-            "Paste the prompt you copied and press Send",
-            "Select ALL of the response (Ctrl+A) and copy it",
-            "Come back here and paste it in the box below"
-          ].map((text, i) => (
-            <div key={i} style={styles.instructionRow}>
-              <span style={styles.icon}>{i + 1}</span>
-              <span style={styles.instructionText}>{text}</span>
-            </div>
-          ))}
-        </div>
-
-        <div style={styles.textareaWrap}>
-          <div style={styles.textareaHeader}>
-            <span style={styles.textareaLabel}>YOUR AI GUIDE</span>
-            {aiText.length > 0 && (
-              <span style={styles.charCount}>{aiText.length} characters</span>
+        {status.message && (
+          <div
+            className={`status-message ${
+              status.type === "denied" ? "error" : status.type
+            }`}
+            role={status.type === "error" ? "alert" : "status"}
+          >
+            <strong>{status.message}</strong>
+            {status.details?.length > 0 && (
+              <ul>
+                {status.details.map((detail) => (
+                  <li key={detail}>{detail}</li>
+                ))}
+              </ul>
             )}
           </div>
-          <textarea
-            style={styles.textarea}
-            placeholder="Paste the full AI response here..."
-            value={aiText}
-            onChange={e => {
-              setAiText(e.target.value)
-              setError("")
-            }}
-          />
-        </div>
-
-        {error && <p style={styles.error}>{error}</p>}
-
-        {saved ? (
-          <div style={styles.successBox}>
-            ✓ Report saved! Tasks added to your tracker. Taking you to reports...
-          </div>
-        ) : (
-          <button onClick={handleSave} style={styles.saveBtn}>
-            Save This Report →
-          </button>
         )}
 
-        <button onClick={() => setCurrentScreen("prompt")} style={styles.backBtn}>
-          ← Back to Prompt
-        </button>
+        {validationResult?.valid && parsedGuide && (
+          <div className="notice-card active stack">
+            <div className="row-between">
+              <div>
+                <p className="page-kicker">Validated Guide</p>
+                <h3>{parsedGuide.guideTitle}</h3>
+                <p>{parsedGuide.recommendedPath}</p>
+              </div>
+              <span className="badge active">{parsedGuide.userLevel}</span>
+            </div>
 
-      </div>
-    </div>
-  )
+            <div className="card-grid">
+              <div className="dashboard-card">
+                <p className="page-kicker">Phases</p>
+                <h3>{parsedStats.phaseCount}</h3>
+              </div>
+              <div className="dashboard-card">
+                <p className="page-kicker">Weeks</p>
+                <h3>{parsedStats.weekCount}</h3>
+              </div>
+              <div className="dashboard-card">
+                <p className="page-kicker">Tasks</p>
+                <h3>{parsedStats.taskCount}</h3>
+              </div>
+              <div className="dashboard-card">
+                <p className="page-kicker">Duplicate</p>
+                <h3>{duplicateReport ? "Yes" : "No"}</h3>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {successSummary && (
+          <div className="status-message success stack">
+            <strong>
+              {successSummary.duplicate
+                ? "Existing report loaded."
+                : "Guide saved successfully."}
+            </strong>
+            <span>Title: {successSummary.title}</span>
+            <span>Path: {successSummary.path}</span>
+            <span>
+              Structure: {successSummary.phaseCount} phases,{" "}
+              {successSummary.weekCount} weeks, {successSummary.taskCount} tasks
+            </span>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => setCurrentScreen("tracker")}
+            >
+              View Tracker →
+            </button>
+          </div>
+        )}
+
+        <div className="actions">
+          <button type="button" onClick={handleValidate} disabled={isProcessing || !localText.trim()}>
+            Validate Guide
+          </button>
+
+          <button
+            type="button"
+            className="primary"
+            onClick={handleSubmit}
+            disabled={isProcessing || !localText.trim()}
+          >
+            {isProcessing ? "Processing..." : "Submit & Build Tracker →"}
+          </button>
+
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setCurrentScreen("prompt")}
+            disabled={isProcessing}
+          >
+            ← Back to Prompt
+          </button>
+        </div>
+      </section>
+    </section>
+  );
 }
-
-const styles = {
-  page: { minHeight: "100vh", background: "#0a0a0a", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px 16px", fontFamily: "'Segoe UI', sans-serif" },
-  card: { width: "100%", maxWidth: "680px", background: "#111", border: "1px solid #222", borderRadius: "12px", padding: "36px 32px", display: "flex", flexDirection: "column", gap: "20px" },
-  badge: { display: "inline-block", background: "#1a1a1a", border: "1px solid #333", color: "#00ff88", fontSize: "11px", fontWeight: "700", letterSpacing: "2px", padding: "4px 10px", borderRadius: "4px", width: "fit-content" },
-  title: { color: "#fff", fontSize: "22px", fontWeight: "700", margin: 0 },
-  subtitle: { color: "#888", fontSize: "14px", margin: 0, lineHeight: "1.5" },
-  instructions: { background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: "8px", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "10px" },
-  instructionRow: { display: "flex", alignItems: "center", gap: "12px" },
-  icon: { width: "24px", height: "24px", borderRadius: "50%", background: "#00ff88", color: "#000", fontSize: "12px", fontWeight: "700", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  instructionText: { color: "#ccc", fontSize: "14px" },
-  textareaWrap: { border: "1px solid #2a2a2a", borderRadius: "8px", overflow: "hidden" },
-  textareaHeader: { background: "#1a1a1a", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #2a2a2a" },
-  textareaLabel: { color: "#555", fontSize: "11px", fontWeight: "700", letterSpacing: "1.5px" },
-  charCount: { color: "#00ff88", fontSize: "11px", fontWeight: "600" },
-  textarea: { width: "100%", minHeight: "300px", background: "#0d0d0d", color: "#ccc", border: "none", padding: "16px", fontSize: "13px", lineHeight: "1.7", resize: "vertical", fontFamily: "'Segoe UI', sans-serif", boxSizing: "border-box", outline: "none" },
-  error: { color: "#ff4444", fontSize: "13px", margin: 0, padding: "10px 14px", background: "#1a0000", border: "1px solid #440000", borderRadius: "6px" },
-  successBox: { padding: "14px", background: "#0a2a1a", border: "1px solid #00ff88", borderRadius: "8px", color: "#00ff88", fontSize: "14px", fontWeight: "600", textAlign: "center" },
-  saveBtn: { padding: "14px", background: "#00ff88", border: "none", borderRadius: "8px", color: "#000", fontSize: "15px", fontWeight: "700", cursor: "pointer", width: "100%" },
-  backBtn: { padding: "10px", background: "transparent", border: "1px solid #333", borderRadius: "8px", color: "#666", fontSize: "13px", cursor: "pointer", width: "100%" }
-}
-
-export default PasteResult

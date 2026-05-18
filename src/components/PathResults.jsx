@@ -17,7 +17,9 @@ function PathResults({ userProfile, pathScores, setPathScores, recommendedPaths,
         prefers: [userProfile.interest, userProfile.learningStyle].filter(Boolean),
         avoids: [],
         needsBeginnerFriendly: userProfile.experience === "beginner" || userProfile.experience === "some",
-        riskTolerance: userProfile.urgency === "very" ? "Low" : "Medium"
+        riskTolerance: userProfile.urgency === "very" ? "Low" : "Medium",
+        // ADD the raw interest field for category filtering in paths.js
+        interest: userProfile.interest || ""
       }
 
       const bundle = getRecommendationBundle(profile)
@@ -56,7 +58,9 @@ function PathResults({ userProfile, pathScores, setPathScores, recommendedPaths,
     prefers: [userProfile.interest, userProfile.learningStyle].filter(Boolean),
     avoids: [],
     needsBeginnerFriendly: userProfile.experience === "beginner" || userProfile.experience === "some",
-    riskTolerance: userProfile.urgency === "very" ? "Low" : "Medium"
+    riskTolerance: userProfile.urgency === "very" ? "Low" : "Medium",
+    // ADD the raw interest field for category filtering
+    interest: userProfile.interest || ""
   }
 
   const bundle = getRecommendationBundle(profile)

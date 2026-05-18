@@ -1,263 +1,329 @@
-import { AI_WEB3_OPPORTUNITIES } from "../data/paths"
+// src/logic/promptBuilder.js
+// Builds the external LLM prompt used by VEKTÖR V1.
+// The output contract is strict so PasteResult can validate and parse it.
 
-export function buildPrompt(profile, selectedPath, guideType) {
-  const guide = guideType || "free"
+import { AI_WEB3_OPPORTUNITIES, getPathById } from "../data/paths";
 
-  const path =
-    typeof selectedPath === "object" && selectedPath !== null
-      ? selectedPath
-      : AI_WEB3_OPPORTUNITIES.find(p => p.pathId === selectedPath)
+const DEFAULT_GUIDE_TYPE = "free";
 
-  const pathName =
-    path?.name ||
-    (typeof selectedPath === "string" ? selectedPath : "Selected Path")
+const GUIDE_RULES = {
+  free:
+    "Recommend only completely free resources. No paid courses, no trials requiring cards, no freemium traps. If a paid tool is unavoidable, explain the free workaround instead.",
+  paid:
+    "Premium resources are allowed only where they create measurable acceleration. Include price estimates where known, but do not invent exact prices. Explain why each paid resource is worth it.",
+  mixed:
+    "Use free resources for foundations. Include paid resources only when they create a clear skill or income acceleration. Label every resource as [FREE] or [PAID].",
+};
 
-  const guideInstructions = {
-    free: "BUDGET RULE: Recommend ONLY completely free resources. No paid courses, no trials that require credit cards, no freemium traps. Every single resource must be accessible with zero money. If you cannot find a free version, say so honestly and suggest the closest free alternative.",
-    paid: "BUDGET RULE: Include premium paid resources where they create genuine acceleration. Include exact current pricing. For every paid resource, write one sentence justifying why it is worth the cost specifically for this person's situation and goals. Do not recommend paid resources just to fill space.",
-    mixed: "BUDGET RULE: Use free resources for foundations, paid only where they create a clear, measurable skill jump. Label every resource [FREE] or [PAID]. Never recommend a paid resource without explaining what the free alternative is and why it falls short."
+const URGENCY_RULES = {
+  very:
+    "The user needs visible results within 30 days. Prioritize fast proof-of-work, outreach, portfolio samples, small paid offers, and direct execution. Remove low-leverage theory.",
+  soon:
+    "The user wants results in 60-90 days. Balance learning with execution. Every week must produce something visible: a demo, report, dashboard, content asset, pitch, or case study.",
+  longterm:
+    "The user is building for 6-12 months. Depth is acceptable, but every month must still produce visible proof-of-work.",
+};
+
+const EXPERIENCE_RULES = {
+  beginner:
+    "The user is a beginner. Define acronyms, avoid hidden assumptions, and give step-by-step actions.",
+  some:
+    "The user has some exposure but no strong track record. Skip generic motivation and focus on converting knowledge into proof-of-work.",
+  intermediate:
+    "The user has working familiarity. Do not over-explain basics. Focus on gaps, execution, positioning, and monetization.",
+  advanced:
+    "The user is advanced. Treat them like a peer. Focus on leverage, differentiation, credibility, and top-tier execution.",
+};
+
+const LEARNING_STYLE_RULES = {
+  videos:
+    "The user prefers videos. Prioritize YouTube, walkthroughs, demos, and visual explanations.",
+  reading:
+    "The user prefers reading. Prioritize documentation, essays, reports, books, and written guides.",
+  building:
+    "The user learns by building. Every learning item must pair with a build task.",
+  tasks:
+    "The user wants checklists. Make tasks specific, numbered, and action-oriented.",
+  mixed:
+    "The user has a mixed learning style. Combine short reading, video, and practical building.",
+};
+
+function normalizeText(value, fallback = "Not specified") {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (Array.isArray(value)) {
+    return value.length ? value.join(", ") : fallback;
   }
 
-  const urgencyMap = {
-    very: "URGENCY LEVEL — CRITICAL (30 days to first income): Every recommendation must be filtered through one question: does this directly lead to a paid outcome within 4 weeks? Remove anything that does not. Skip theory phases entirely. Start with the minimum viable skill set to charge for something. This person cannot afford to spend weeks learning before earning.",
-    soon: "URGENCY LEVEL — MODERATE (60-90 days to first results): Balance skill-building with fast application. No phase should be longer than 2 weeks before producing something tangible. Every week must end with a deliverable that could be shown to a potential client.",
-    longterm: "URGENCY LEVEL — LONG-TERM BUILD (6-12 months): Prioritise depth and compounding skills. It is acceptable to spend time on fundamentals. But every month must still produce visible proof-of-work. Depth without output is invisible."
+  if (typeof value === "object") {
+    return JSON.stringify(value, null, 2);
   }
 
-  const experienceContext = {
-    beginner: "EXPERIENCE CONTEXT: Complete beginner. Assume zero prior knowledge of AI tools, Web3, or the industry. Define every acronym on first use. Explain why each tool exists before explaining how to use it. Do not skip steps that feel obvious — what is obvious to an expert is invisible to a beginner.",
-    some: "EXPERIENCE CONTEXT: Some exposure, no track record. They understand surface-level concepts but have not shipped work or earned from this skill yet. Skip the very basics. Focus on the gap between knowing about something and actually doing it professionally.",
-    intermediate: "EXPERIENCE CONTEXT: Real experience, some track record. They have shipped work before. Do not explain fundamentals. Focus entirely on closing the specific gaps between their current level and the income targets on this path.",
-    advanced: "EXPERIENCE CONTEXT: Advanced practitioner. Treat them as a peer. Skip all foundational content. Focus on positioning, high-leverage moves, scaling existing skills, and finding the specific edge that separates top 10% earners from the rest on this path."
-  }
-
-  const learningStyleMap = {
-    videos: "LEARNING STYLE: Video-first learner. Prioritise YouTube channels, structured video courses, and visual demonstrations. For every concept, lead with the best video resource. Only suggest text/documentation as a supplement.",
-    reading: "LEARNING STYLE: Reading-first learner. Prioritise written guides, official documentation, long-form articles, newsletters, and books. Suggest video content only where text resources genuinely do not exist.",
-    building: "LEARNING STYLE: Build-first learner. Every phase must include something to create, ship, or publish. Do not recommend consuming content without a corresponding build task. Theory without a project is wasted for this person.",
-    tasks: "LEARNING STYLE: Checklist-driven learner. Structure everything as numbered action steps. Do not explain concepts in paragraph form — convert every concept into a task. This person needs to know exactly what to do next, not what to think about.",
-    mixed: "LEARNING STYLE: Mixed learner. Alternate between video, reading, and hands-on projects. No more than 3 consecutive days on any single format. Variety is not optional for this person — monotony kills their momentum."
-  }
-
-  const hoursText = profile.hoursPerDay === 1
-    ? "1 hour per day (treat every minute as non-renewable — zero tolerance for low-leverage activities)"
-    : profile.hoursPerDay === 2
-    ? "2 hours per day (split: 45 mins learning, 75 mins doing/building)"
-    : profile.hoursPerDay >= 3
-    ? `${profile.hoursPerDay} hours per day (use extra time for building proof-of-work and outreach, not more content consumption)`
-    : `${profile.hoursPerDay} hours per day`
-
-  const market2026 = `
-CRITICAL 2026 MARKET CONTEXT — READ BEFORE WRITING:
-The AI/Web3 landscape has shifted significantly. These facts must inform every recommendation:
-
-AI MARKET 2026:
-- Prompt engineering as a standalone skill has commoditised — the market now pays for AI + domain expertise combinations
-- The highest-paying AI roles in 2026 combine AI tool proficiency with a vertical (legal, medical, finance, marketing, Web3)
-- AI agents and automation workflows (n8n, Make.com, Zapier + AI) are the fastest-growing freelance category
-- Video AI tools (Sora, Runway, Kling) have created an entirely new content production category
-- Companies are paying $500-5000/month for AI workflow consultants who can audit and automate their operations
-- The "AI wrapper" business model (building products on top of GPT/Claude APIs) is now saturated at the basic level — differentiation requires deep domain knowledge
-
-WEB3 MARKET 2026:
-- DeFi has matured — most protocols now pay community managers $2000-8000/month in tokens + stablecoins
-- The best-paid Web3 writers in 2026 specialise: DeFi mechanics, L2 infrastructure, or RWA (Real World Assets)
-- NFTs as profile pictures are dead — NFTs as utility (ticketing, credentials, memberships) are growing
-- Account abstraction and wallet UX improvements have made Web3 more accessible — community management is harder because users expect Web2-level experience
-- The biggest Web3 opportunity in 2026 for non-technical people: protocol documentation, user education content, and onboarding flows
-- L2 ecosystem wars (Base, Arbitrum, Optimism, zkSync) are creating sustained demand for ecosystem contributors
-`
-
-  return `You are a world-class AI/Web3 career strategist writing in May 2026. You have a precise understanding of what the market is actually paying for right now, not what it was paying 2 years ago.
-
-You are creating a single comprehensive document for one specific person. This is not a template filled with their name. Every recommendation must be genuinely calibrated to their background, strengths, time, and urgency.
-
-${market2026}
-
-═══════════════════════════════════════════════════
-PERSON PROFILE — READ EVERY LINE BEFORE WRITING
-═══════════════════════════════════════════════════
-Full name: ${profile.name}
-Chosen career path: ${pathName}
-Primary interest: ${profile.interest?.toUpperCase()}
-Experience level: ${profile.experience}
-Natural strengths: ${profile.strengths?.join(", ") || "not specified"}
-Background: ${profile.background || "not provided"}
-Available time: ${hoursText}
-Budget: ${guide}
-Learning style: ${profile.learningStyle}
-
-${profile.strengths?.length ? `STRENGTHS INSTRUCTION: Their strengths (${profile.strengths.join(", ")}) are not background information — they are the competitive advantage you must design the entire path around. Where can these strengths make them 10x faster than someone starting from zero?` : ""}
-
-${profile.background?.length > 10 ? `BACKGROUND INSTRUCTION: "${profile.background}" — this is the most important line in this profile. Find the transferable value in this background. Every person has an unfair advantage from their past. Find theirs and make it the centre of their positioning strategy.` : ""}
-
-═══════════════════════════════════════════════════
-CONSTRAINTS
-═══════════════════════════════════════════════════
-${guideInstructions[guide] || guideInstructions.free}
-${urgencyMap[profile.urgency] || ""}
-${experienceContext[profile.experience] || ""}
-${learningStyleMap[profile.learningStyle] || ""}
-
-═══════════════════════════════════════════════════
-QUALITY STANDARDS — NON-NEGOTIABLE
-═══════════════════════════════════════════════════
-- Never use the phrase "it depends" without immediately saying what it depends on and giving a specific answer
-- Never recommend a resource without a URL or clear way to find it
-- Never give a time estimate without explaining the assumptions behind it
-- Never say "consider doing X" — say "do X" or "do not do X"
-- If you are about to write something that applies to every person on this path, stop and rewrite it to apply specifically to ${profile.name}
-- Every income figure must be sourced from 2025-2026 market data, not aspirational thinking
-- If a path has a known failure rate or common trap, name it explicitly
-
-═══════════════════════════════════════════════════
-OUTPUT FORMAT — FOLLOW EXACTLY
-═══════════════════════════════════════════════════
-Use these exact section headers. Do not add sections. Do not skip sections.
-
----SECTION-1-PATH-ANALYSIS---
----SECTION-2-REALITY-CHECK---
----SECTION-3-LEARNING-PLAN---
----SECTION-4-RESOURCES---
----SECTION-5-TOOLS---
----SECTION-6-48HR-PLAN---
----SECTION-7-TASK-CHECKLIST---
----SECTION-8-FIRST-MONEY---
----SECTION-9-WARNINGS---
----SECTION-10-MILESTONES---
----SECTION-11-STUDY-CURRICULUM---
-
-These markers allow VEKTÖR to parse and display each section correctly. Do not omit them.
-
-═══════════════════════════════════════════════════
-CONTENT INSTRUCTIONS PER SECTION
-═══════════════════════════════════════════════════
-
----SECTION-1-PATH-ANALYSIS---
-PERSONAL PATH ANALYSIS
-Write 4-5 sentences. Answer: Why does ${pathName} fit ${profile.name} specifically — not generally? What does their background in "${profile.background || "their stated background"}" give them that someone starting from zero does not have? What is their single strongest competitive angle on this path in 2026?
-
----SECTION-2-REALITY-CHECK---
-HONEST REALITY CHECK
-Three things. For each: the hard truth, why it catches people with ${profile.name}'s profile specifically, and the exact counter-move.
-1. The thing that makes most people quit at week 3 on this path
-2. The income expectation gap (what people think they will earn vs what they actually earn in month 1-3)
-3. The skill they think they need but do not, and the skill they do not know they need but do
-
----SECTION-3-LEARNING-PLAN---
-PHASE-BY-PHASE LEARNING PLAN
-Calibrated to: ${hoursText} | ${profile.urgency} urgency | ${profile.learningStyle} learning style
-
-For each phase write:
-PHASE NAME & DURATION:
-GOAL: (one sentence — what this phase produces)
-DAILY SCHEDULE: (exact hour-by-hour breakdown for ${profile.hoursPerDay} hours)
-RESOURCES: (name, URL, why this one for this person)
-WEEK-END DELIVERABLE: (the specific thing they must have built/published/sent by end of phase)
-PHASE COMPLETE WHEN: (measurable criteria, not a feeling)
-
-Phase 1: Foundation
-Phase 2: Core Skills  
-Phase 3: Practice
-Phase 4: Build and Publish
-Phase 5: Earn and Apply
-
----SECTION-4-RESOURCES---
-TOP 5 RESOURCES
-Chosen for: ${profile.learningStyle} learning style + ${guide} budget + ${pathName} path
-Format each as:
-RESOURCE NAME:
-URL:
-WHY FOR ${profile.name.toUpperCase()} SPECIFICALLY:
-COST: [FREE/PAID — exact price if paid]
-TIME TO COMPLETE:
-WHAT TO DO WITH IT AFTER: (how to apply what they learned immediately)
-
----SECTION-5-TOOLS---
-TOOLS TO MASTER IN 2026
-The exact tools that pay on the ${pathName} path right now. Not tools from 2022.
-For each: Tool name | What it does | Why it matters for this path in 2026 | Time to basic competency | Free or Paid | Priority (learn first / learn later)
-
----SECTION-6-48HR-PLAN---
-FIRST 48 HOURS — EXACT ACTIONS
-${profile.name} opens this guide right now. What do they do?
-Write numbered steps. Each step has: the action, the exact link or command, and how long it takes.
-Total time must fit within ${profile.hoursPerDay * 2} hours across 2 days.
-No step can be vague. "Research X" is not a step. "Open [URL], read [specific section], do [specific action]" is a step.
-
----SECTION-7-TASK-CHECKLIST---
-COMPLETE TASK CHECKLIST
-25-30 tasks. Every task must be specific to ${pathName} in 2026.
-Format each task on its own line exactly as:
-[CATEGORY] Task title | Estimated time
-Categories: Learn / Practice / Build / Publish-Share / Earn-Apply
-Tasks must progress logically from foundation to earning. No task should be vague.
-
----SECTION-8-FIRST-MONEY---
-FIRST MONEY ROUTE
-How does ${profile.name} — with their background in "${profile.background || "their background"}", ${hoursText}, and ${guide} budget — make their first $50-$500?
-Write a numbered sequence. Include:
-- The exact platform or channel to use
-- The exact offer or service to sell
-- The exact pitch or message to send
-- Realistic timeframe (be honest — not "day 3" if it is more likely week 6)
-- What to do if the first attempt fails
-
----SECTION-9-WARNINGS---
-5 CRITICAL WARNINGS
-The 5 mistakes that will cost ${profile.name} the most time and money on this path.
-For each:
-MISTAKE: (name it plainly)
-WHY IT HAPPENS: (the psychological or practical reason)
-THE COST: (what it actually costs in time and money)
-THE FIX: (the exact counter-behaviour)
-
----SECTION-10-MILESTONES---
-SUCCESS MILESTONES
-What does success look like for ${profile.name} at each stage? Be specific with numbers.
-30 DAYS: (skill acquired, deliverable produced, income: realistic figure or $0 with explanation)
-60 DAYS: (skill level, portfolio pieces, income range)
-90 DAYS: (market positioning, client count or job applications, income range)
-6 MONTHS: (where they should be career and income-wise if they execute consistently)
-
----SECTION-11-STUDY-CURRICULUM---
-STRUCTURED STUDY CURRICULUM
-This section is a standalone learning guide for ${pathName} in 2026.
-Designed for self-study. Can be used independently of the career plan above.
-
-CURRICULUM OVERVIEW:
-Total duration: X weeks at ${hoursText}
-Prerequisite knowledge: (what they must know before starting — be specific)
-What this curriculum does NOT cover: (set expectations clearly)
-
-MODULE 1: [Foundation Topic]
-- Learning objective: (what they will be able to do after this module)
-- Core concepts: (bullet list — concepts only, no fluff)
-- Study materials: (specific resources with URLs)
-- Practice exercise: (one specific exercise to cement the learning)
-- Self-assessment: (how they know they have understood it — a question to answer or task to complete)
-- Estimated time: X hours
-
-MODULE 2: [Core Skill 1]
-(same structure)
-
-MODULE 3: [Core Skill 2]
-(same structure)
-
-MODULE 4: [Core Skill 3]
-(same structure)
-
-MODULE 5: [Applied Practice]
-(same structure)
-
-MODULE 6: [Portfolio Building]
-(same structure)
-
-MODULE 7: [Monetisation & Market Entry]
-(same structure)
-
-CURRICULUM COMPLETION TEST:
-List 5 questions or tasks. If ${profile.name} can answer/complete all 5, they are ready to charge for this skill.
-
-Write the full content for all modules. Do not abbreviate. Do not say "see resources above." This curriculum must stand alone.`
+  return String(value);
 }
+
+function getPath(selectedPath) {
+  if (!selectedPath) return null;
+
+  if (typeof selectedPath === "object") return selectedPath;
+
+  return (
+    getPathById?.(selectedPath) ||
+    AI_WEB3_OPPORTUNITIES.find(
+      (path) =>
+        path.pathId === selectedPath ||
+        path.id === selectedPath ||
+        path.name === selectedPath ||
+        path.title === selectedPath
+    ) ||
+    null
+  );
+}
+
+function getHoursText(profile = {}) {
+  const rawHours = Number(profile.hoursPerDay || profile.availableTime || profile.timePerDay || 0);
+
+  if (!rawHours) return "Not specified";
+
+  if (rawHours === 1) {
+    return "1 hour per day. Every task must be small, direct, and high leverage.";
+  }
+
+  if (rawHours === 2) {
+    return "2 hours per day. Split between learning, building, and outreach.";
+  }
+
+  if (rawHours >= 3) {
+    return `${rawHours} hours per day. Use extra time for proof-of-work, publishing, and outreach, not endless consumption.`;
+  }
+
+  return `${rawHours} hours per day.`;
+}
+
+function buildPathContext(path) {
+  if (!path) {
+    return `
+SELECTED PATH:
+- Name: Selected Path
+- Description: Not available
+- Required skills: Not available
+- Ideal for: Not available
+- Timeline: Not available
+- Income potential: Not available
+- Difficulty: Not available
+`;
+  }
+
+  return `
+SELECTED PATH:
+- ID: ${normalizeText(path.id || path.pathId)}
+- Name: ${normalizeText(path.title || path.name)}
+- Category: ${normalizeText(path.category)}
+- Subcategory: ${normalizeText(path.subcategory)}
+- Type: ${normalizeText(path.type || path.pathType)}
+- Description: ${normalizeText(path.description || path.firstMoneyRoute || path.whyItFits)}
+- Required skills: ${normalizeText(path.requiredSkills || path.skillsNeeded)}
+- Ideal for: ${normalizeText(path.idealFor || path.bestFor)}
+- Tools to learn: ${normalizeText(path.tools || path.toolsToLearn)}
+- Minimum proof-of-work: ${normalizeText(path.proofOfWork || path.minimumProofOfWork)}
+- Estimated timeline: ${normalizeText(path.estimatedMonths || path.timeline)}
+- Income potential: ${normalizeText(path.incomePotential || path.earningPotential)}
+- Difficulty: ${normalizeText(path.difficulty)}
+- First 7 days from database: ${normalizeText(path.first7Days)}
+- First 30 days from database: ${normalizeText(path.first30Days)}
+- Next 90 days from database: ${normalizeText(path.next90Days)}
+- Risks: ${normalizeText(path.risks)}
+`;
+}
+
+function buildProfileContext(profile = {}) {
+  return `
+USER PROFILE:
+- Name: ${normalizeText(profile.name || profile.fullName || profile.username)}
+- Interest area: ${normalizeText(profile.interestArea || profile.interests || profile.primaryInterest)}
+- Experience level: ${normalizeText(profile.experienceLevel || profile.experience)}
+- Natural strengths: ${normalizeText(profile.strengths || profile.naturalStrengths)}
+- Background: ${normalizeText(profile.background)}
+- Available time: ${getHoursText(profile)}
+- Urgency: ${normalizeText(profile.urgency)}
+- Learning style: ${normalizeText(profile.learningStyle)}
+- Budget: ${normalizeText(profile.budget)}
+- Main goal: ${normalizeText(profile.goal || profile.mainGoal)}
+- Constraints: ${normalizeText(profile.constraints)}
+`;
+}
+
+export function buildPrompt(profile = {}, selectedPath = null, guideType = DEFAULT_GUIDE_TYPE) {
+  const guide = guideType || DEFAULT_GUIDE_TYPE;
+  const path = getPath(selectedPath);
+
+  const budgetRule = GUIDE_RULES[guide] || GUIDE_RULES.free;
+  const urgencyRule = URGENCY_RULES[profile.urgency] || normalizeText(profile.urgency);
+  const experienceRule =
+    EXPERIENCE_RULES[profile.experienceLevel] ||
+    EXPERIENCE_RULES[profile.experience] ||
+    normalizeText(profile.experienceLevel || profile.experience);
+  const learningRule =
+    LEARNING_STYLE_RULES[profile.learningStyle] || normalizeText(profile.learningStyle);
+
+  return `You are generating a VEKTÖR V1 career execution guide.
+
+CRITICAL OUTPUT CONTRACT:
+1. Your response must start with exactly this line and nothing before it:
+VEKTOR_GUIDE_V1
+2. Do not wrap the JSON in markdown fences.
+3. Do not include commentary before the marker.
+4. Do not include commentary after the closing JSON brace.
+5. If you cannot generate a valid guide, output only:
+VEKTOR_GUIDE_ERROR
+REASON: [plain English reason]
+6. The guide must include TRACKER_JSON exactly once.
+7. TRACKER_JSON must be valid JSON.
+8. The JSON must contain phases -> weeks -> tasks.
+9. Every task must be concrete, trackable, and written as an action.
+10. Do not invent impossible income guarantees.
+11. Do not recommend dangerous, illegal, or unethical activity.
+12. Do not ask the user to provide private keys, seed phrases, passwords, or confidential credentials.
+
+MARKET CONTEXT:
+- The year is 2026.
+- Prompt engineering alone is commoditized. Practical workflows, domain expertise, proof-of-work, and distribution matter more.
+- AI/Web3 opportunities reward visible execution: demos, dashboards, reports, systems, published analysis, community work, and client outcomes.
+- For Web3, prioritize credible research, security awareness, user education, analytics, community operations, and protocol-facing proof.
+- For AI, prioritize automation workflows, research systems, productized services, applied content systems, and measurable business outcomes.
+
+GUIDE TYPE:
+${guide}
+
+BUDGET RULE:
+${budgetRule}
+
+URGENCY RULE:
+${urgencyRule}
+
+EXPERIENCE RULE:
+${experienceRule}
+
+LEARNING STYLE RULE:
+${learningRule}
+
+${buildProfileContext(profile)}
+
+${buildPathContext(path)}
+
+OUTPUT STRUCTURE:
+Your entire response must follow this exact structure:
+
+VEKTOR_GUIDE_V1
+
+GUIDE_TITLE:
+[Create a specific title based on the selected path and user profile]
+
+RECOMMENDED_PATH:
+[Selected path name]
+
+USER_LEVEL:
+[beginner | intermediate | advanced]
+
+SUMMARY:
+[Write 4-6 sentences explaining why this path fits the user, what they should focus on, and the main execution risk.]
+
+EXECUTION_RULES:
+- [Rule 1]
+- [Rule 2]
+- [Rule 3]
+- [Rule 4]
+- [Rule 5]
+
+TRACKER_JSON:
+{
+  "guideType": "VEKTOR_GUIDE_V1",
+  "guideTitle": "string",
+  "recommendedPath": "string",
+  "userLevel": "beginner | intermediate | advanced",
+  "summary": "string",
+  "createdFor": {
+    "name": "string",
+    "experienceLevel": "string",
+    "availableTime": "string",
+    "urgency": "string",
+    "budget": "string",
+    "learningStyle": "string"
+  },
+  "phases": [
+    {
+      "phaseId": "phase-1",
+      "phaseTitle": "Foundation",
+      "phaseGoal": "string",
+      "weeks": [
+        {
+          "weekId": "phase-1-week-1",
+          "weekTitle": "Week 1",
+          "weekGoal": "string",
+          "tasks": [
+            {
+              "taskId": "phase-1-week-1-task-1",
+              "title": "string",
+              "category": "Learning | Building | Research | Outreach | Content | Portfolio | Review",
+              "description": "string",
+              "completionCriteria": "string",
+              "estimatedTime": "string"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "milestones": [
+    {
+      "milestoneId": "milestone-1",
+      "title": "string",
+      "targetDate": "string",
+      "proofRequired": "string"
+    }
+  ],
+  "resources": [
+    {
+      "resourceId": "resource-1",
+      "title": "string",
+      "type": "video | article | documentation | tool | course | community | dataset",
+      "cost": "FREE | PAID | MIXED",
+      "reason": "string"
+    }
+  ],
+  "risks": [
+    {
+      "riskId": "risk-1",
+      "risk": "string",
+      "mitigation": "string"
+    }
+  ],
+  "firstAction": "string"
+}
+
+CONTENT REQUIREMENTS:
+- Create 3 to 5 phases.
+- Each phase must contain 1 to 4 weeks.
+- Each week must contain 3 to 7 tasks.
+- Do not include "completed" fields in tasks.
+- Do not include trailing commas in JSON.
+- Use double quotes only inside JSON.
+- Keep task IDs unique.
+- Make categories consistent.
+- Completion criteria must be observable.
+- Include at least one outreach, publishing, or proof-of-work task per week unless the selected path is deeply technical.
+- For beginner users, include foundational explanations but still force output.
+- For urgent users, compress learning and increase execution.
+- For free-budget users, use free resources only.
+
+FINAL CHECK BEFORE ANSWERING:
+Before sending the final response, silently verify:
+- First line is VEKTOR_GUIDE_V1.
+- TRACKER_JSON exists exactly once.
+- JSON is valid.
+- JSON starts with { and ends with }.
+- There is no text after the final closing JSON brace.
+`;
+}
+
+export default buildPrompt;

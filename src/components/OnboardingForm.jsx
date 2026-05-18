@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { save } from "../logic/storage"
+import { saveToStorage, STORAGE_KEYS } from "../logic/storage"
 
 const STRENGTHS_OPTIONS = [
   { id: "writing",      label: "✍️ Writing / Explaining" },
@@ -29,7 +29,7 @@ const LEARNING_STYLE_OPTIONS = [
   { id: "mixed",    label: "🔀 Mixed — combine everything" }
 ]
 
-function OnboardingForm({ setCurrentScreen, setUserProfile }) {
+function OnboardingForm({ setCurrentScreen, onOnboardingComplete }) {
   const [step, setStep] = useState(0)
 
   const [form, setForm] = useState({
@@ -96,24 +96,13 @@ function OnboardingForm({ setCurrentScreen, setUserProfile }) {
   function handleFinish() {
     const finalProfile = { ...form }
 
-    save("profile", finalProfile)
-    setUserProfile(finalProfile)
-
-    let hasSeenIntro = false
-
-    try {
-      hasSeenIntro = JSON.parse(
-        localStorage.getItem("vektor_hasSeenIntro") || "false"
-      )
-    } catch (error) {
-      console.warn("Could not read intro status:", error)
+    saveToStorage(STORAGE_KEYS.USER_PROFILE, finalProfile)
+    // Mark intro as seen in case it wasn't already
+    if (!localStorage.getItem(STORAGE_KEYS.HAS_SEEN_INTRO)) {
+      localStorage.setItem(STORAGE_KEYS.HAS_SEEN_INTRO, 'true');
     }
-
-    if (finalProfile.experience === "beginner" && !hasSeenIntro) {
-      setCurrentScreen("introPrompt")
-    } else {
-      setCurrentScreen("results")
-    }
+    // Call parent handler to update app state and navigate
+    onOnboardingComplete(finalProfile)
   }
 
   const progress = Math.round((step / totalSteps) * 100)

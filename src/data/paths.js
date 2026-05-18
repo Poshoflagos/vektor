@@ -2003,7 +2003,21 @@ export const calculatePathFitScore = (userProfile, path) => {
 };
 
 export const rankPathsForUser = (userProfile, opportunities = AI_WEB3_OPPORTUNITIES) => {
-  return opportunities
+  // --- INTEREST FILTER (starts here) ---
+  const userInterest = userProfile?.interest || userProfile?.primaryInterest || "";
+  let filteredOpportunities = opportunities;
+
+  if (userInterest === "ai") {
+    filteredOpportunities = opportunities.filter(p => p.category === "AI");
+  } else if (userInterest === "web3") {
+    filteredOpportunities = opportunities.filter(p => p.category === "Web3");
+  } else if (userInterest === "both") {
+    filteredOpportunities = opportunities.filter(p => p.category === "AI x Web3");
+  }
+  // If interest is missing or unknown, show all paths (no filter)
+  // --- INTEREST FILTER (ends here) ---
+
+  return filteredOpportunities
     .map((path) => ({
       ...path,
       fitScore: calculatePathFitScore(userProfile, path),
@@ -2099,3 +2113,286 @@ export const DATABASE_HEALTH_CHECK = {
     "regulatoryRiskLevel"
   ]
 };
+
+// -----------------------------------------------------------------------------
+// VEKTÖR V1 Compatibility + Normalization Layer
+// Version: 2026.05.18-v1-final
+// Purpose:
+// - Preserve the full researched AI_WEB3_OPPORTUNITIES database above.
+// - Expose a stable V1 path schema for explainer, scoring UI, path cards,
+//   prompt generation, and tracker/report flows.
+// - Avoid destructive rewrites of the original research dataset.
+// -----------------------------------------------------------------------------
+
+export const VEKTOR_V1_NORMALIZATION_VERSION = "2026.05.18-v1-final";
+
+const EMPTY_ARRAY = Object.freeze([]);
+
+const asArray = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+};
+
+const asText = (value, fallback = "") => {
+  if (typeof value === "string") return value.trim() || fallback;
+  if (value === null || value === undefined) return fallback;
+  return String(value).trim() || fallback;
+};
+
+const clampScore = (value, fallback = 5) => {
+  const number = Number(value);
+  if (Number.isNaN(number)) return fallback;
+  return Math.max(1, Math.min(10, number));
+};
+
+const requirementToScore = (level) => {
+  const value = asText(level).toLowerCase();
+
+  if (value.includes("none")) return 1;
+  if (value.includes("low")) return 3;
+  if (value.includes("medium")) return 6;
+  if (value.includes("very high")) return 10;
+  if (value.includes("high")) return 8;
+
+  return 5;
+};
+
+const normalizeIncomePotential = (earningPotential) => {
+  if (!earningPotential) {
+    return "Income varies by skill, proof-of-work, outreach, location, timing, and client quality.";
+  }
+
+  if (typeof earningPotential === "string") return earningPotential;
+
+  const beginner = earningPotential.beginner ? `Beginner: ${earningPotential.beginner}` : null;
+  const early = earningPotential.earlyCompetent ? `Early: ${earningPotential.earlyCompetent}` : null;
+  const skilled = earningPotential.skilled ? `Skilled: ${earningPotential.skilled}` : null;
+  const elite = earningPotential.elite ? `Elite: ${earningPotential.elite}` : null;
+  const notes = earningPotential.notes ? `Note: ${earningPotential.notes}` : null;
+
+  return [beginner, early, skilled, elite, notes].filter(Boolean).join(" | ");
+};
+
+const normalizeEstimatedMonths = (path) => {
+  const explicitTimeline = asText(path.timeline);
+  const timeline = explicitTimeline.toLowerCase();
+
+  if (!timeline) return "Timeline depends on user profile and execution consistency.";
+
+  if (
+    timeline.includes("2–6 weeks") ||
+    timeline.includes("2-6 weeks") ||
+    timeline.includes("3–6 weeks") ||
+    timeline.includes("3-6 weeks") ||
+    timeline.includes("3–7 weeks") ||
+    timeline.includes("3-7 weeks")
+  ) {
+    return "1–2 months";
+  }
+
+  if (
+    timeline.includes("4–8 weeks") ||
+    timeline.includes("4-8 weeks") ||
+    timeline.includes("5–9 weeks") ||
+    timeline.includes("5-9 weeks") ||
+    timeline.includes("5–10 weeks") ||
+    timeline.includes("5-10 weeks")
+  ) {
+    return "1–3 months";
+  }
+
+  if (
+    timeline.includes("6–10 weeks") ||
+    timeline.includes("6-10 weeks") ||
+    timeline.includes("6–12 weeks") ||
+    timeline.includes("6-12 weeks") ||
+    timeline.includes("8–14 weeks") ||
+    timeline.includes("8-14 weeks")
+  ) {
+    return "2–4 months";
+  }
+
+  if (
+    timeline.includes("10–16 weeks") ||
+    timeline.includes("10-16 weeks") ||
+    timeline.includes("10–18 weeks") ||
+    timeline.includes("10-18 weeks") ||
+    timeline.includes("12–20 weeks") ||
+    timeline.includes("12-20 weeks")
+  ) {
+    return "3–5 months";
+  }
+
+  if (timeline.includes("6+ months") || timeline.includes("6 months") || timeline.includes("18 months")) {
+    return "6+ months";
+  }
+
+  return explicitTimeline;
+};
+
+const textCorpus = (path) =>
+  [
+    path.name,
+    path.category,
+    path.subcategory,
+    path.pathType,
+    path.firstMoneyRoute,
+    path.whyItFits,
+    path.whyItMayNot,
+    ...asArray(path.skillsNeeded),
+    ...asArray(path.requiredSkillTags),
+    ...asArray(path.interestTags),
+    ...asArray(path.bestFor),
+    ...asArray(path.personalityFit),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+const includesAny = (corpus, keywords) => keywords.some((keyword) => corpus.includes(keyword));
+
+const categoryScore = (path, keywords, positiveScore = 10, fallbackScore = 2) => {
+  const corpus = textCorpus(path);
+  return includesAny(corpus, keywords) ? positiveScore : fallbackScore;
+};
+
+const inferWritingScore = (path) =>
+  categoryScore(path, ["writing", "writer", "content", "documentation", "sop", "research", "brief", "copywriting"], 9, 4);
+
+const inferResearchScore = (path) =>
+  categoryScore(path, ["research", "analysis", "analyst", "market", "source", "dashboard", "tokenomics", "on-chain", "data"], 9, 4);
+
+const inferTradingScore = (path) =>
+  categoryScore(path, ["trading", "market", "tokenomics", "on-chain", "defi", "liquidity", "dashboard", "crypto"], 8, 2);
+
+const inferCommunityScore = (path) =>
+  categoryScore(path, ["community", "moderation", "discord", "telegram", "growth", "events", "partnership", "bd"], 9, 3);
+
+const inferCreativeScore = (path) =>
+  categoryScore(path, ["creative", "video", "content", "creator", "media", "design", "visual", "brand"], 9, 3);
+
+const inferTechnicalScore = (path) => requirementToScore(path.technicalRequirement);
+
+const normalizeScoringWeights = (path) => ({
+  aiInterest: clampScore(categoryScore(path, ["ai", "automation", "prompt", "llm", "agent", "chatbot"])),
+  web3Interest: clampScore(categoryScore(path, ["web3", "crypto", "defi", "dao", "token", "on-chain", "solidity", "protocol"])),
+  technicalComfort: clampScore(inferTechnicalScore(path)),
+  writingStrength: clampScore(inferWritingScore(path)),
+  researchStrength: clampScore(inferResearchScore(path)),
+  tradingInterest: clampScore(inferTradingScore(path)),
+  communityStrength: clampScore(inferCommunityScore(path)),
+  creativeStrength: clampScore(inferCreativeScore(path)),
+  urgency: clampScore(path.speedToMoney || 5),
+  availableTime: clampScore(path.longTermUpside || 5),
+  beginnerFriendly: clampScore(path.beginnerSuitability || 5),
+});
+
+export const normalizePathForV1 = (path) => {
+  const id = asText(path.pathId || path.id);
+  const title = asText(path.name || path.title, "Untitled VEKTÖR Path");
+  const description = asText(
+    path.firstMoneyRoute || path.description || path.whyItFits,
+    "No description available."
+  );
+
+  return {
+    ...path,
+
+    // Stable V1 fields expected by explainer, scoring UI, path results, and prompts.
+    id,
+    pathId: id,
+    title,
+    name: title,
+    description,
+    requiredSkills: asArray(path.skillsNeeded).length ? asArray(path.skillsNeeded) : asArray(path.requiredSkillTags),
+    idealFor: asArray(path.bestFor),
+    scoringWeights: normalizeScoringWeights(path),
+    estimatedMonths: normalizeEstimatedMonths(path),
+    incomePotential: normalizeIncomePotential(path.earningPotential),
+    difficulty: path.difficulty || DIFFICULTY.INTERMEDIATE,
+
+    // UI aliases that avoid components reaching into inconsistent field names.
+    type: path.pathType || "Uncategorized",
+    category: path.category || "Uncategorized",
+    subcategory: path.subcategory || "General",
+    summary: asText(path.whyItFits || path.firstMoneyRoute || path.description),
+    caution: asText(path.whyItMayNot || path.beginnerWarning),
+    proofOfWork: asArray(path.minimumProofOfWork),
+    tools: asArray(path.toolsToLearn),
+    risks: asArray(path.risks),
+    first7Days: asArray(path.first7Days),
+    first30Days: asArray(path.first30Days),
+    next90Days: asArray(path.next90Days),
+  };
+};
+
+export const PATHS = AI_WEB3_OPPORTUNITIES.map(normalizePathForV1);
+
+export const CAREER_PATHS = PATHS;
+
+export const paths = PATHS;
+
+export const getAllPaths = () => PATHS;
+
+export const getPathById = (id) => {
+  if (!id) return null;
+
+  const target = String(id).toLowerCase();
+
+  return (
+    PATHS.find((path) =>
+      [path.id, path.pathId, path.name, path.title]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase() === target)
+    ) || null
+  );
+};
+
+export const getPathsByCategory = (category) => {
+  if (!category) return PATHS;
+
+  const target = String(category).toLowerCase();
+  return PATHS.filter((path) => String(path.category).toLowerCase() === target);
+};
+
+export const getPathsByType = (type) => {
+  if (!type) return PATHS;
+
+  const target = String(type).toLowerCase();
+  return PATHS.filter((path) => String(path.type || path.pathType).toLowerCase() === target);
+};
+
+export const getExplainerPaths = () =>
+  PATHS.map((path) => ({
+    id: path.id,
+    title: path.title,
+    category: path.category,
+    subcategory: path.subcategory,
+    type: path.type,
+    description: path.description,
+    requiredSkills: path.requiredSkills,
+    idealFor: path.idealFor,
+    estimatedMonths: path.estimatedMonths,
+    incomePotential: path.incomePotential,
+    difficulty: path.difficulty,
+    beginnerSuitability: path.beginnerSuitability,
+    speedToMoney: path.speedToMoney,
+    longTermUpside: path.longTermUpside,
+    first7Days: path.first7Days || EMPTY_ARRAY,
+    first30Days: path.first30Days || EMPTY_ARRAY,
+  }));
+
+export const getPathStats = () => ({
+  totalPaths: PATHS.length,
+  categories: PATHS.reduce((acc, path) => {
+    acc[path.category] = (acc[path.category] || 0) + 1;
+    return acc;
+  }, {}),
+  types: PATHS.reduce((acc, path) => {
+    const type = path.type || path.pathType || "Uncategorized";
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {}),
+});
+
+export default PATHS;
