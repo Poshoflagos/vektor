@@ -417,16 +417,7 @@ export function diagnoseGuideIssue(fullText) {
   return diagnosis;
 }
 
-// ========== EXISTING EXPORTS ==========
-
-export function getGuideBasicSummary(text) {
-  const value = normalizeInput(text);
-  return {
-    guideTitle: extractLineValue(value, "GUIDE_TITLE:"),
-    recommendedPath: extractLineValue(value, "RECOMMENDED_PATH:"),
-    userLevel: extractLineValue(value, "USER_LEVEL:"),
-  };
-}
+// ========== UTILITY EXPORTS ==========
 
 export function isLikelyVektorGuide(text) {
   const value = normalizeInput(text);
