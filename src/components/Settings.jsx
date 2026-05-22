@@ -1,375 +1,260 @@
-import { useState } from "react"
-import { resetAll } from "../logic/storage"
-
-const VEKTOR_LOCAL_KEYS = [
-  "vektor_access",
-  "vektor_profile",
-  "vektor_scores",
-  "vektor_paths",
-  "vektor_guideType",
-  "vektor_prompt",
-  "vektor_aiResult",
-  "vektor_reports",
-  "vektor_selectedPath",
-  "vektor_tracker",
-  "vektor_hasSeenIntro",
-  "vektor_feedback",
-  "vektor_darkmode"
-]
+// src/components/Settings.jsx
+import { useEffect, useState } from "react";
+import { getCloudSession, saveProfileCloud, supabase, signOutCloud } from "../logic/supabase";
 
 export default function Settings({
   setCurrentScreen,
   setIsAuthenticated,
-  setUserProfile,
-  setPathScores,
-  setRecommendedPaths,
-  setGuideType,
-  setGeneratedPrompt,
-  setAiResult,
-  setSavedReports,
-  setSelectedPath,
-  setTrackerTasks
+  onClearData,
 }) {
-  const [showConfirm, setShowConfirm] = useState(false)
-  const [resetting, setResetting] = useState(false)
+  const [userEmail, setUserEmail] = useState("");
+  const [operatorName, setOperatorName] = useState("");
+  
+  // Wipe Data State
+  const [isWiping, setIsWiping] = useState(false);
+  const [confirmWipe, setConfirmWipe] = useState(false);
 
-  function clearVektorLocalStorage() {
-    try {
-      VEKTOR_LOCAL_KEYS.forEach(key => {
-        localStorage.removeItem(key)
-      })
-    } catch (error) {
-      console.warn("Could not clear localStorage:", error)
-    }
-  }
+  // Terminate Account State
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
-  function resetAppState() {
-    if (setIsAuthenticated) setIsAuthenticated(false)
-    if (setUserProfile) setUserProfile(null)
-    if (setPathScores) setPathScores(null)
-    if (setRecommendedPaths) setRecommendedPaths(null)
-    if (setGuideType) setGuideType(null)
-    if (setGeneratedPrompt) setGeneratedPrompt("")
-    if (setAiResult) setAiResult("")
-    if (setSavedReports) setSavedReports([])
-    if (setSelectedPath) setSelectedPath(null)
-    if (setTrackerTasks) setTrackerTasks([])
-  }
+  // Change Password State
+  const [newPassword, setNewPassword] = useState("");
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [passwordStatus, setPasswordStatus] = useState({ type: "idle", message: "" });
 
-  function handleReset() {
-    setResetting(true)
-
-    setTimeout(() => {
-      try {
-        resetAll()
-      } catch (error) {
-        console.warn("resetAll failed, using fallback clear:", error)
+  // Fetch secure user data on load
+  useEffect(() => {
+    async function fetchOperatorIdentity() {
+      const { user } = await getCloudSession();
+      if (user) {
+        setUserEmail(user.email);
+        
+        const { data } = await supabase
+          .from("profiles")
+          .select("username")
+          .eq("id", user.id)
+          .single();
+          
+        if (data) setOperatorName(data.username);
       }
+    }
+    fetchOperatorIdentity();
+  }, []);
 
-      clearVektorLocalStorage()
-      resetAppState()
+  const maskedEmail = userEmail
+    ? `${userEmail.slice(0, 2)}***@${userEmail.split("@")[1]}`
+    : "Loading secure data...";
 
-      setCurrentScreen("password")
-      setResetting(false)
-      setShowConfirm(false)
-    }, 800)
+  // 1. Change Password Flow
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      setPasswordStatus({ type: "error", message: "Password must be at least 6 characters." });
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    setPasswordStatus({ type: "info", message: "Updating security protocols..." });
+
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+
+    if (error) {
+      setPasswordStatus({ type: "error", message: error.message });
+    } else {
+      setPasswordStatus({ type: "success", message: "Password successfully updated." });
+      setNewPassword("");
+    }
+    
+    setIsUpdatingPassword(false);
+  }
+
+  // 2. Soft Reset Flow (Erase Data)
+  async function handleCloudWipe() {
+    if (!confirmWipe) {
+      setConfirmWipe(true);
+      setConfirmDelete(false); // Close the other prompt if open
+      return;
+    }
+
+    setIsWiping(true);
+    const { user } = await getCloudSession();
+
+    if (user) {
+      try {
+        await supabase.from("reports").delete().eq("user_id", user.id);
+        await saveProfileCloud(user.id, {
+          operator_profile: null,
+          recommended_paths: null,
+          selected_path: null,
+          tracker_data: null,
+          has_seen_intro: false,
+        });
+      } catch (error) {
+        console.error("Cloud wipe failed:", error);
+      }
+    }
+
+    if (typeof onClearData === "function") onClearData();
+    
+    setIsWiping(false);
+    setConfirmWipe(false);
+  }
+
+  // 3. True Account Deletion Flow
+  async function handleDeleteAccount() {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setConfirmWipe(false); // Close the other prompt if open
+      return;
+    }
+
+    setIsDeleting(true);
+    const { user } = await getCloudSession();
+
+    if (user) {
+      try {
+        // Calls the secure Postgres function we created to delete the auth user
+        await supabase.rpc("delete_user");
+      } catch (error) {
+        console.error("Account deletion failed:", error);
+      }
+    }
+
+    // Nuke the local app state and boot them out
+    await signOutCloud();
+    if (typeof onClearData === "function") onClearData();
+    if (typeof setIsAuthenticated === "function") setIsAuthenticated(false);
+  }
+
+  // 4. Logout Flow
+  async function handleLocalLogout() {
+    await signOutCloud();
+    if (typeof setIsAuthenticated === "function") setIsAuthenticated(false);
   }
 
   return (
-    <div style={styles.page}>
-      <div style={styles.inner}>
-        <div style={styles.header}>
-          <div>
-            <h1 style={styles.title}>Settings</h1>
-            <p style={styles.subtitle}>
-              Manage your VEKTÖR data, security, and app status.
-            </p>
+    <section className="page-container stack" aria-label="System Settings">
+      <header className="page-header">
+        <p className="page-kicker">System Configuration</p>
+        <div className="row-between">
+          <div className="row">
+            <h1>Settings</h1>
+            <span className="badge active">V2 Private Alpha</span>
           </div>
-
-          <span style={styles.version}>v1.0.0</span>
+          <button type="button" onClick={() => setCurrentScreen("welcome")}>
+            ← Dashboard
+          </button>
         </div>
+      </header>
 
-        {/* Security Warning */}
-        <div style={styles.warningBox}>
-          <p style={styles.warningTitle}>⚠️ Security Warning</p>
-          <p style={styles.warningText}>
-            VEKTÖR stores all data locally in your browser. Never enter seed
-            phrases, private keys, wallet passwords, bank details, or real
-            passwords into this app. This tool is for career planning only.
-          </p>
-        </div>
-
-        {/* App Status */}
-        <div style={styles.card}>
-          <h2 style={styles.cardTitle}>App Status</h2>
-
-          <div style={styles.infoRow}>
-            <span style={styles.infoLabel}>Version</span>
-            <span style={styles.infoValue}>v1.0.0</span>
+      <section className="card stack">
+        <h2>Operator Identity</h2>
+        <div className="card-grid">
+          <div className="dashboard-card stack">
+            <p className="page-kicker">Operator Name</p>
+            <h3>{operatorName || "Loading..."}</h3>
           </div>
-
-          <div style={styles.infoRow}>
-            <span style={styles.infoLabel}>Mode</span>
-            <span style={styles.infoValue}>Private Beta</span>
-          </div>
-
-          <div style={styles.infoRow}>
-            <span style={styles.infoLabel}>Storage</span>
-            <span style={styles.infoValue}>localStorage — this device only</span>
-          </div>
-
-          <div style={styles.infoRow}>
-            <span style={styles.infoLabel}>Backend</span>
-            <span style={styles.infoValue}>None — $0 to run</span>
-          </div>
-
-          <div style={styles.infoRow}>
-            <span style={styles.infoLabel}>AI Mode</span>
-            <span style={styles.infoValue}>Manual prompt flow</span>
-          </div>
-
-          <div style={styles.infoRow}>
-            <span style={styles.infoLabel}>Access</span>
-            <span style={styles.infoValue}>Shared password</span>
+          <div className="dashboard-card stack">
+            <p className="page-kicker">Secure Email</p>
+            <h3>{maskedEmail}</h3>
           </div>
         </div>
-
-        {/* Appearance */}
-        <div style={styles.card}>
-          <h2 style={styles.cardTitle}>Appearance</h2>
-          <p style={styles.cardText}>
-            VEKTÖR v1 uses a fixed dark interface to keep the prototype stable.
-            Light mode is planned for a later version.
-          </p>
-
-          <div style={styles.infoRow}>
-            <span style={styles.infoLabel}>Current theme</span>
-            <span style={styles.infoValue}>Dark</span>
-          </div>
-
-          <div style={styles.infoRow}>
-            <span style={styles.infoLabel}>Light mode</span>
-            <span style={styles.infoValue}>Planned for v2</span>
+        <div className="notice-card active">
+          <div className="row-between">
+            <strong>Network Status</strong>
+            <span className="badge active">Connected to VEKTÖR Cloud</span>
           </div>
         </div>
+      </section>
 
-        {/* About */}
-        <div style={styles.card}>
-          <h2 style={styles.cardTitle}>About VEKTÖR</h2>
-          <p style={styles.cardText}>
-            VEKTÖR is a personal AI/Web3 path engine. It helps users find their
-            best career path, generate a personalised learning guide, and track
-            progress — all stored privately on this device in v1.
-          </p>
-        </div>
-
-        {/* Reset */}
-        <div style={styles.dangerCard}>
-          <h2 style={styles.dangerTitle}>Danger Zone</h2>
-          <p style={styles.cardText}>
-            This will permanently delete your profile, scores, selected path,
-            reports, tracker tasks, prompt data, beginner intro status, and beta
-            feedback from this browser. You will be returned to the password
-            screen. This cannot be undone.
-          </p>
-
-          {!showConfirm ? (
+      <section className="card stack">
+        <h2>Security & Authentication</h2>
+        <p className="muted">Update your cloud access credentials.</p>
+        
+        <form onSubmit={handleChangePassword} className="stack">
+          <div className="row-between">
+            <input
+              type="password"
+              placeholder="Enter new password..."
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              disabled={isUpdatingPassword}
+              style={{ flex: 1, maxWidth: '300px' }}
+            />
             <button
-              style={styles.dangerBtn}
-              onClick={() => setShowConfirm(true)}
+              type="submit"
+              className="primary"
+              disabled={isUpdatingPassword || !newPassword}
             >
-              Reset All Data
+              {isUpdatingPassword ? "Updating..." : "Update Password"}
+            </button>
+          </div>
+          
+          {passwordStatus.message && (
+            <div className={`status-message ${passwordStatus.type === "error" ? "error" : "success"}`}>
+              {passwordStatus.message}
+            </div>
+          )}
+        </form>
+      </section>
+
+      <section className="card stack">
+        <p className="page-kicker danger">Danger Zone</p>
+        <h2>System Reset & Termination</h2>
+        <p className="muted">
+          Warning: These actions are permanent. Erasing data keeps your account alive for future use. Terminating your account destroys all data and revokes your Alpha access permanently.
+        </p>
+
+        <div className="actions">
+          {/* ERASE DATA BUTTON */}
+          {!confirmWipe ? (
+            <button type="button" className="secondary" onClick={() => setConfirmWipe(true)} disabled={confirmDelete}>
+              Erase Cloud Data
             </button>
           ) : (
-            <div style={styles.confirmBox}>
-              <p style={styles.confirmText}>
-                Confirm reset. This deletes everything permanently.
-              </p>
-
-              <div style={styles.confirmBtns}>
-                <button
-                  style={styles.cancelBtn}
-                  onClick={() => setShowConfirm(false)}
-                  disabled={resetting}
-                >
+            <div className="status-message warning stack" style={{ width: '100%' }}>
+              <strong>Erase all saved reports and profile data?</strong>
+              <div className="row">
+                <button type="button" className="secondary" onClick={() => setConfirmWipe(false)} disabled={isWiping}>
                   Cancel
                 </button>
+                <button type="button" className="danger" onClick={handleCloudWipe} disabled={isWiping}>
+                  {isWiping ? "Erasing..." : "Yes, Erase Data"}
+                </button>
+              </div>
+            </div>
+          )}
 
-                <button
-                  style={styles.confirmDangerBtn}
-                  onClick={handleReset}
-                  disabled={resetting}
-                >
-                  {resetting ? "Resetting..." : "Yes, Reset Everything"}
+          {/* TERMINATE ACCOUNT BUTTON */}
+          {!confirmDelete ? (
+            <button type="button" className="danger" onClick={() => setConfirmDelete(true)} disabled={confirmWipe}>
+              Terminate Account
+            </button>
+          ) : (
+            <div className="status-message error stack" style={{ width: '100%' }}>
+              <strong>Terminate account and destroy all records? This cannot be undone.</strong>
+              <div className="row">
+                <button type="button" className="secondary" onClick={() => setConfirmDelete(false)} disabled={isDeleting}>
+                  Cancel
+                </button>
+                <button type="button" className="danger" onClick={handleDeleteAccount} disabled={isDeleting}>
+                  {isDeleting ? "Terminating..." : "Yes, Terminate Account"}
                 </button>
               </div>
             </div>
           )}
         </div>
-      </div>
-    </div>
-  )
-}
+      </section>
 
-const styles = {
-  page: {
-    minHeight: "100vh",
-    background: "#0a0a0a",
-    padding: "86px 16px 70px",
-    fontFamily: "'Courier New', monospace",
-    boxSizing: "border-box"
-  },
-  inner: {
-    maxWidth: "680px",
-    margin: "0 auto",
-    display: "flex",
-    flexDirection: "column",
-    gap: "20px"
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "16px"
-  },
-  title: {
-    color: "#fff",
-    fontSize: "28px",
-    margin: "0 0 8px"
-  },
-  subtitle: {
-    color: "#888",
-    fontSize: "13px",
-    lineHeight: "1.6",
-    margin: 0
-  },
-  version: {
-    color: "#00ff88",
-    border: "1px solid #222",
-    background: "#111",
-    borderRadius: "999px",
-    padding: "7px 12px",
-    fontSize: "12px",
-    fontFamily: "monospace",
-    whiteSpace: "nowrap"
-  },
-  warningBox: {
-    background: "#1a1200",
-    border: "1px solid #3a2800",
-    borderRadius: "10px",
-    padding: "16px 20px"
-  },
-  warningTitle: {
-    color: "#aa8800",
-    fontSize: "13px",
-    fontWeight: "700",
-    margin: "0 0 8px"
-  },
-  warningText: {
-    color: "#998866",
-    fontSize: "13px",
-    lineHeight: "1.6",
-    margin: 0
-  },
-  card: {
-    background: "#111",
-    border: "1px solid #222",
-    borderRadius: "12px",
-    padding: "24px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "12px"
-  },
-  cardTitle: {
-    color: "#fff",
-    fontSize: "16px",
-    margin: 0
-  },
-  cardText: {
-    color: "#888",
-    fontSize: "13px",
-    lineHeight: "1.7",
-    margin: 0
-  },
-  infoRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "16px",
-    paddingTop: "10px",
-    borderTop: "1px solid #1a1a1a"
-  },
-  infoLabel: {
-    color: "#555",
-    fontSize: "12px"
-  },
-  infoValue: {
-    color: "#aaa",
-    fontSize: "12px",
-    textAlign: "right"
-  },
-  dangerCard: {
-    background: "#111",
-    border: "1px solid #3a1111",
-    borderRadius: "12px",
-    padding: "24px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "12px"
-  },
-  dangerTitle: {
-    color: "#ff4444",
-    fontSize: "16px",
-    margin: 0
-  },
-  dangerBtn: {
-    padding: "12px 24px",
-    background: "transparent",
-    border: "1px solid #ff4444",
-    borderRadius: "8px",
-    color: "#ff4444",
-    fontSize: "13px",
-    fontWeight: "700",
-    cursor: "pointer",
-    width: "100%"
-  },
-  confirmBox: {
-    background: "#1a0000",
-    border: "1px solid #440000",
-    borderRadius: "8px",
-    padding: "16px"
-  },
-  confirmText: {
-    color: "#ff8888",
-    fontSize: "13px",
-    margin: "0 0 14px"
-  },
-  confirmBtns: {
-    display: "flex",
-    gap: "10px",
-    flexWrap: "wrap"
-  },
-  cancelBtn: {
-    flex: 1,
-    padding: "10px",
-    background: "transparent",
-    border: "1px solid #333",
-    borderRadius: "6px",
-    color: "#666",
-    fontSize: "13px",
-    cursor: "pointer",
-    minWidth: "140px"
-  },
-  confirmDangerBtn: {
-    flex: 1,
-    padding: "10px",
-    background: "#ff4444",
-    border: "none",
-    borderRadius: "6px",
-    color: "#fff",
-    fontSize: "13px",
-    fontWeight: "700",
-    cursor: "pointer",
-    minWidth: "180px"
-  }
+      <section className="card stack">
+        <h2>Session Management</h2>
+        <div className="actions">
+          <button type="button" className="secondary" onClick={handleLocalLogout}>
+            Disconnect & Logout
+          </button>
+        </div>
+      </section>
+    </section>
+  );
 }

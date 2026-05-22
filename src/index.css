@@ -900,3 +900,44 @@ p {
 .password-toggle:active:not(:disabled) {
   transform: translateY(-50%) scale(0.98);
 }
+.intro-modal-screen {
+  min-height: calc(100vh - 72px);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}
+
+.intro-modal-card {
+  width: min(620px, 92vw);
+  border: 1px solid var(--color-border);
+  border-top: 2px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  padding: var(--space-8);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.intro-modal-card h1 {
+  margin-bottom: var(--space-4);
+}
+
+.intro-modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+@media (max-width: 600px) {
+  .intro-modal-card {
+    padding: var(--space-5);
+  }
+
+  .intro-modal-actions {
+    grid-template-columns: 1fr;
+  }
+}
+/* V2 Landing Page Full-Bleed Override */
+.app-main:has(.v2-landing) {
+  padding: 0 !important;
+}

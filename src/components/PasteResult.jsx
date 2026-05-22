@@ -4,6 +4,7 @@ import { createReport, upsertReport } from "../logic/storage";
 import { validateVektorGuide } from "../logic/guideValidator";
 import { parseVektorGuide, getParsedGuideStats } from "../logic/guideParser";
 import { buildTrackerBundleFromGuide } from "../logic/trackerBuilder";
+import { getCloudSession, saveReportCloud } from "../logic/supabase";
 
 const MIN_PROCESSING_MS = 220;
 
@@ -194,7 +195,8 @@ export default function PasteResult({
       details: [],
     });
 
-    window.setTimeout(() => {
+    // Made this callback async to allow for cloud syncing
+    window.setTimeout(async () => {
       const guide = parsedGuide || validateAndParseGuide();
 
       if (!guide) {
@@ -203,6 +205,8 @@ export default function PasteResult({
       }
 
       const trackerBundle = buildTrackerBundleFromGuide(guide);
+      
+      // 1. Create the Report Object
       const report = createReport({
         title: guide.guideTitle,
         recommendedPath:
@@ -216,8 +220,23 @@ export default function PasteResult({
         trackerSummary: trackerBundle.trackerSummary,
       });
 
+      // 2. Save locally (Redundancy)
       const reportResult = upsertReport(report);
       const activeReport = reportResult.report;
+
+      // 3. SHOOT TO CLOUD (NEW LOGIC)
+      if (!reportResult.duplicate) {
+        const { user } = await getCloudSession();
+        if (user) {
+          const { error } = await saveReportCloud(user.id, {
+            report_content: activeReport
+          });
+          if (error) {
+            console.error("Failed to sync report to cloud:", error);
+          }
+        }
+      }
+
       const trackerWithSource = {
         ...trackerBundle.trackerData,
         sourceReportId: activeReport.id,

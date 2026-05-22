@@ -8,6 +8,7 @@ import {
   saveToStorage,
   STORAGE_KEYS,
 } from "./logic/storage";
+import { getCloudSession, signOutCloud, loadProfileCloud, saveProfileCloud } from "./logic/supabase";
 
 import OnboardingForm from "./components/OnboardingForm";
 import Welcome from "./components/Welcome";
@@ -22,9 +23,11 @@ import Settings from "./components/Settings";
 import IntroLesson from "./components/IntroLesson";
 import BeginnerIntroPrompt from "./components/BeginnerIntroPrompt";
 import PathDirectory from "./components/PathDirectory";
-import PasswordGate from "./components/PasswordGate";
+import AuthScreen from "./components/AuthScreen";
+import LandingPage from "./components/LandingPage";
 
 const SCREENS = {
+  LANDING: "landing",
   PASSWORD: "password",
   WELCOME: "welcome",
   FORM: "form",
@@ -98,7 +101,7 @@ function getStartScreen({
   selectedPath,
   recommendedPaths,
 }) {
-  if (!authenticated) return SCREENS.PASSWORD;
+  if (!authenticated) return SCREENS.LANDING;
   if (!isProfileComplete(profile)) {
     return hasSeenIntro ? SCREENS.FORM : SCREENS.INTRO_PROMPT;
   }
@@ -186,51 +189,118 @@ function App() {
     saveToStorage(STORAGE_KEYS.HAS_SEEN_INTRO, resolved);
   }
 
+  // --- BOOTUP: LOAD FROM CLOUD ---
   useEffect(() => {
-    const hydrated = hydrateVektorState();
+    async function initializeApp() {
+      // 1. Check cloud session
+      const { session, user } = await getCloudSession();
+      const hasCloudAccess = Boolean(session);
 
-    const hydratedUserProfile = hydrated.userProfile;
-    const hydratedRecommendedPaths = hydrated.paths?.length ? hydrated.paths : null;
-    const hydratedSelectedPath = hydrated.selectedPath;
-    const hydratedTrackerData = hydrated.trackerData;
-    const hydratedHasSeenIntro = Boolean(hydrated.hasSeenIntro);
+      let cloudProfile = null;
+      let cloudPaths = null;
+      let cloudSelectedPath = null;
+      let cloudTracker = null;
+      let cloudSeenIntro = false;
 
-    // V1 private beta rule:
-    // Always require the password again on page refresh/reopen.
-    // User progress still persists; access session does not.
-    const hydratedHasAccess = false;
-    removeFromStorage(STORAGE_KEYS.ACCESS);
+      // 2. If logged in, fetch their specific data from Supabase
+      if (hasCloudAccess && user) {
+        const { success, data } = await loadProfileCloud(user.id);
+        if (success && data) {
+          cloudProfile = data.operator_profile;
+          cloudPaths = data.recommended_paths;
+          cloudSelectedPath = data.selected_path;
+          cloudTracker = data.tracker_data;
+          cloudSeenIntro = Boolean(data.has_seen_intro);
+        }
+      }
 
-    appStateRef.current = {
-      isAuthenticated: hydratedHasAccess,
-      userProfile: hydratedUserProfile,
-      recommendedPaths: hydratedRecommendedPaths,
-      selectedPath: hydratedSelectedPath,
-      trackerData: hydratedTrackerData,
-      hasSeenIntro: hydratedHasSeenIntro,
-    };
+      // 3. Fallback to local storage (acts as automatic migration for V1 users)
+      const hydrated = hydrateVektorState();
+      
+      const finalProfile = cloudProfile || hydrated.userProfile;
+      const finalPaths = cloudPaths || (hydrated.paths?.length ? hydrated.paths : null);
+      const finalSelectedPath = cloudSelectedPath || hydrated.selectedPath;
+      const finalTracker = cloudTracker || hydrated.trackerData;
+      const finalSeenIntro = cloudSeenIntro || Boolean(hydrated.hasSeenIntro);
 
-    setIsAuthenticated(hydratedHasAccess);
-    setUserProfile(hydratedUserProfile);
-    setPathScores(hydrated.scores);
-    setRecommendedPaths(hydratedRecommendedPaths);
-    setGuideType(hydrated.guideType);
-    setGeneratedPrompt(hydrated.generatedPrompt || "");
-    setPastedOutput(hydrated.pastedOutput || "");
-    setSavedReports(Array.isArray(hydrated.savedReports) ? hydrated.savedReports : []);
-    setSelectedPath(hydratedSelectedPath);
-    setActiveGuide(hydrated.activeGuide);
-    setActiveReportId(hydrated.activeReportId);
-    setTrackerData(hydratedTrackerData);
-    setTrackerProgress(hydrated.trackerProgress || {});
-    setCheckInData(hydrated.checkInData);
-    setHasSeenIntro(hydratedHasSeenIntro);
+      appStateRef.current = {
+        isAuthenticated: hasCloudAccess,
+        userProfile: finalProfile,
+        recommendedPaths: finalPaths,
+        selectedPath: finalSelectedPath,
+        trackerData: finalTracker,
+        hasSeenIntro: finalSeenIntro,
+      };
 
-    setCurrentScreen(SCREENS.PASSWORD);
+      setIsAuthenticated(hasCloudAccess);
+      setUserProfile(finalProfile);
+      setPathScores(hydrated.scores);
+      setRecommendedPaths(finalPaths);
+      setGuideType(hydrated.guideType);
+      setGeneratedPrompt(hydrated.generatedPrompt || "");
+      setPastedOutput(hydrated.pastedOutput || "");
+      setSavedReports(Array.isArray(hydrated.savedReports) ? hydrated.savedReports : []);
+      setSelectedPath(finalSelectedPath);
+      setActiveGuide(hydrated.activeGuide);
+      setActiveReportId(hydrated.activeReportId);
+      setTrackerData(finalTracker);
+      setTrackerProgress(hydrated.trackerProgress || {});
+      setCheckInData(hydrated.checkInData);
+      setHasSeenIntro(finalSeenIntro);
 
-    hasHydrated.current = true;
+      if (hasCloudAccess) {
+        setCurrentScreen(
+          getStartScreen({
+            authenticated: true,
+            profile: finalProfile,
+            hasSeenIntro: finalSeenIntro,
+            selectedPath: finalSelectedPath,
+            recommendedPaths: finalPaths,
+          })
+        );
+      } else {
+        setCurrentScreen(SCREENS.LANDING);
+      }
+
+      hasHydrated.current = true;
+    }
+    
+    initializeApp();
   }, []);
 
+  // --- SYNC: SAVE TO CLOUD ---
+  useEffect(() => {
+    if (!hasHydrated.current || !isAuthenticated) return;
+
+    async function syncToCloud() {
+      const { user } = await getCloudSession();
+      if (user) {
+        await saveProfileCloud(user.id, {
+          operator_profile: userProfile,
+          recommended_paths: recommendedPaths || [],
+          selected_path: selectedPath,
+          tracker_data: trackerData,
+          has_seen_intro: hasSeenIntro
+        });
+      }
+    }
+
+    // Debounce: Wait 1 second after changes before hitting the database
+    const timeoutId = setTimeout(() => {
+      syncToCloud();
+    }, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, [
+    userProfile,
+    recommendedPaths,
+    selectedPath,
+    trackerData,
+    hasSeenIntro,
+    isAuthenticated
+  ]);
+
+  // Local Storage Backup (Kept for redundancy during Beta)
   useEffect(() => {
     if (!hasHydrated.current) return;
 
@@ -298,8 +368,13 @@ function App() {
       return;
     }
 
-    if (!guard.authenticated && screen !== SCREENS.PASSWORD) {
-      setCurrentScreen(SCREENS.PASSWORD);
+    if (!guard.authenticated && screen !== SCREENS.LANDING && screen !== SCREENS.PASSWORD) {
+      setCurrentScreen(SCREENS.LANDING);
+      return;
+    }
+
+    if (screen === SCREENS.LANDING) {
+      setCurrentScreen(SCREENS.LANDING);
       return;
     }
 
@@ -377,7 +452,7 @@ function App() {
     setAuthState(authenticated);
     if (!authenticated) {
       removeFromStorage(STORAGE_KEYS.ACCESS);
-      setCurrentScreen(SCREENS.PASSWORD);
+      setCurrentScreen(SCREENS.LANDING);
       return;
     }
     const guard = getGuardState();
@@ -392,10 +467,27 @@ function App() {
     );
   }
 
-  function handleLogout() {
-    removeFromStorage(STORAGE_KEYS.ACCESS);
-    setAuthState(false);
+ function handleAccessToken(token, email) {
+    // Store access info temporarily
+    localStorage.setItem('vektor_access_token', token);
+    localStorage.setItem('vektor_access_email', email);
+    
+    // Do NOT set authenticated yet. Send them to the Auth Screen to login/signup.
     setCurrentScreen(SCREENS.PASSWORD);
+  }
+
+  async function handleLogout() {
+    // 1. Kill the cloud session securely
+    await signOutCloud();
+    
+    // 2. Wipe the local storage backups
+    removeFromStorage(STORAGE_KEYS.ACCESS);
+    localStorage.removeItem('vektor_access_token');
+    localStorage.removeItem('vektor_access_email');
+    
+    // 3. Reset the UI
+    setAuthState(false);
+    setCurrentScreen(SCREENS.LANDING);
   }
 
   function resetVektorApp() {
@@ -423,7 +515,7 @@ function App() {
     setTrackerProgress({});
     setCheckInData(null);
     setHasSeenIntro(false);
-    setCurrentScreen(SCREENS.PASSWORD);
+    setCurrentScreen(SCREENS.LANDING);
   }
 
   function updateSavedReports(nextReports) {
@@ -443,17 +535,13 @@ function App() {
     });
   }
 
-  // ========== FIX: add this function ==========
   function handleOnboardingComplete(profile) {
     updateUserProfile(profile);
-    // Ensure intro is marked as seen
     if (!appStateRef.current.hasSeenIntro) {
       updateHasSeenIntro(true);
     }
-    // Directly go to results – no guard re-check needed
     goToScreen(SCREENS.RESULTS);
   }
-  // ============================================
 
   return (
     <div className="app-shell">
@@ -466,8 +554,12 @@ function App() {
       )}
 
       <main className="app-main">
+        {currentScreen === SCREENS.LANDING && (
+          <LandingPage onStartAccess={handleAccessToken} />
+        )}
+
         {currentScreen === SCREENS.PASSWORD && (
-          <PasswordGate
+          <AuthScreen
             setIsAuthenticated={handleAuthChange}
             setCurrentScreen={goToScreen}
           />
@@ -490,7 +582,6 @@ function App() {
 
         {currentScreen === SCREENS.FORM && (
           <OnboardingForm
-            // FIX: use onOnboardingComplete instead of setCurrentScreen + setUserProfile
             onOnboardingComplete={handleOnboardingComplete}
           />
         )}

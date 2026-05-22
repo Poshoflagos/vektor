@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { deleteReport, load } from "../logic/storage";
 import { buildTrackerBundleFromGuide } from "../logic/trackerBuilder";
+import { getCloudSession, loadReportsCloud, supabase } from "../logic/supabase";
 
 function getReportDate(report) {
   const value = report?.createdAt || report?.savedAt;
@@ -88,7 +89,7 @@ export default function SavedReports({
   setTrackerData,
   setTrackerProgress,
 }) {
-  const [localReports, setLocalReports] = useState([]);
+  const [localReports, setLocalReports] = useState(Array.isArray(savedReports) ? savedReports : []);
   const [expandedId, setExpandedId] = useState(null);
   const [deletePendingId, setDeletePendingId] = useState(null);
   const [sortMode, setSortMode] = useState("newest");
@@ -97,14 +98,48 @@ export default function SavedReports({
     message: "",
   });
 
-  const reports = Array.isArray(savedReports) ? savedReports : localReports;
+  const reports = Array.isArray(savedReports) && savedReports.length > 0 ? savedReports : localReports;
 
+  // --- BOOTUP: LOAD REPORTS FROM CLOUD ---
   useEffect(() => {
-    if (Array.isArray(savedReports)) return;
+    let mounted = true;
 
-    const loadedReports = load("reports", []) || [];
-    setLocalReports(Array.isArray(loadedReports) ? loadedReports : []);
-  }, [savedReports]);
+    async function syncCloudReports() {
+      const { user } = await getCloudSession();
+      
+      if (user && mounted) {
+        const { success, data } = await loadReportsCloud(user.id);
+        
+        if (success && data) {
+          // Map the cloud database rows back into standard report objects
+          const cloudReports = data.map(row => ({
+            ...row.report_content,
+            cloud_id: row.id // Save the database row ID for fast deletion later
+          }));
+
+          if (mounted) {
+            setLocalReports(cloudReports);
+            if (typeof setSavedReports === "function") {
+              setSavedReports(cloudReports);
+            }
+          }
+          return; // Exit if cloud fetch succeeds
+        }
+      }
+
+      // Fallback: If offline or not logged in, load from local storage
+      if (mounted && (!Array.isArray(savedReports) || savedReports.length === 0)) {
+        const loadedReports = load("reports", []) || [];
+        setLocalReports(Array.isArray(loadedReports) ? loadedReports : []);
+      }
+    }
+
+    syncCloudReports();
+
+    return () => {
+      mounted = false;
+    };
+  }, []); // Run once on mount
 
   const sortedReports = useMemo(() => sortReports(reports, sortMode), [reports, sortMode]);
 
@@ -115,7 +150,6 @@ export default function SavedReports({
       setSavedReports(nextReports);
       return;
     }
-
     setLocalReports(nextReports);
   }
 
@@ -128,7 +162,7 @@ export default function SavedReports({
     });
   }
 
-  function requestDelete(reportId) {
+  async function requestDelete(reportId) {
     if (deletePendingId !== reportId) {
       setDeletePendingId(reportId);
       setStatus({
@@ -138,8 +172,34 @@ export default function SavedReports({
       return;
     }
 
-    const nextReports = deleteReport(reportId);
+    const targetReport = reports.find((r) => r.id === reportId);
+    
+    // 1. Optimistic UI Update (remove instantly for the user)
+    const nextReports = reports.filter((r) => r.id !== reportId);
     updateReports(nextReports);
+
+    // 2. Delete from local storage fallback
+    deleteReport(reportId);
+
+    // 3. SHOOT TO CLOUD: Destroy record in database
+    const { user } = await getCloudSession();
+    if (user) {
+      try {
+        if (targetReport?.cloud_id) {
+          // If we have the exact row ID, use it for speed
+          await supabase.from("reports").delete().eq("id", targetReport.cloud_id);
+        } else {
+          // Fallback: Delete by matching the JSON ID inside the report_content column
+          await supabase
+            .from("reports")
+            .delete()
+            .eq("user_id", user.id)
+            .contains("report_content", { id: reportId });
+        }
+      } catch (err) {
+        console.error("Failed to delete from cloud:", err);
+      }
+    }
 
     if (activeReportId === reportId) {
       if (typeof setActiveReportId === "function") setActiveReportId(null);
@@ -155,7 +215,7 @@ export default function SavedReports({
     setDeletePendingId(null);
     setStatus({
       type: "success",
-      message: "Report deleted.",
+      message: "Report securely deleted from cloud.",
     });
   }
 
