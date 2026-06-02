@@ -25,10 +25,12 @@ import BeginnerIntroPrompt from "./components/BeginnerIntroPrompt";
 import PathDirectory from "./components/PathDirectory";
 import AuthScreen from "./components/AuthScreen";
 import LandingPage from "./components/LandingPage";
+import AccountCreation from "./components/AccountCreation";
 
 const SCREENS = {
   LANDING: "landing",
   PASSWORD: "password",
+  ACCOUNT_CREATION: "accountCreation",
   WELCOME: "welcome",
   FORM: "form",
   RESULTS: "results",
@@ -140,6 +142,9 @@ function App() {
   const [checkInData, setCheckInData] = useState(null);
   const [hasSeenIntro, setHasSeenIntro] = useState(false);
 
+  // Account creation state
+  const [accountEmail, setAccountEmail] = useState('');
+
   function setAuthState(value) {
     const resolved = Boolean(value);
     appStateRef.current.isAuthenticated = resolved;
@@ -192,6 +197,18 @@ function App() {
   // --- BOOTUP: LOAD FROM CLOUD ---
   useEffect(() => {
     async function initializeApp() {
+      // 🔓 DEV BYPASS: Render Tracker immediately for UI testing
+      if (import.meta.env.DEV) {
+        const bypassParam = new URLSearchParams(window.location.search).get('bypass_auth');
+        const bypassStorage = localStorage.getItem('vektor_bypass_auth');
+        if (bypassParam === 'true' || bypassStorage === 'true') {
+          setIsAuthenticated(true);
+          setCurrentScreen(SCREENS.TRACKER);
+          hasHydrated.current = true;
+          return;
+        }
+      }
+
       // 1. Check cloud session
       const { session, user } = await getCloudSession();
       const hasCloudAccess = Boolean(session);
@@ -285,7 +302,6 @@ function App() {
       }
     }
 
-    // Debounce: Wait 1 second after changes before hitting the database
     const timeoutId = setTimeout(() => {
       syncToCloud();
     }, 1000);
@@ -300,7 +316,7 @@ function App() {
     isAuthenticated
   ]);
 
-  // Local Storage Backup (Kept for redundancy during Beta)
+  // Local Storage Backup
   useEffect(() => {
     if (!hasHydrated.current) return;
 
@@ -368,7 +384,8 @@ function App() {
       return;
     }
 
-    if (!guard.authenticated && screen !== SCREENS.LANDING && screen !== SCREENS.PASSWORD) {
+    // Allow LANDING, PASSWORD, and ACCOUNT_CREATION without auth
+    if (!guard.authenticated && screen !== SCREENS.LANDING && screen !== SCREENS.PASSWORD && screen !== SCREENS.ACCOUNT_CREATION) {
       setCurrentScreen(SCREENS.LANDING);
       return;
     }
@@ -380,6 +397,11 @@ function App() {
 
     if (screen === SCREENS.PASSWORD) {
       setCurrentScreen(SCREENS.PASSWORD);
+      return;
+    }
+
+    if (screen === SCREENS.ACCOUNT_CREATION) {
+      setCurrentScreen(SCREENS.ACCOUNT_CREATION);
       return;
     }
 
@@ -467,25 +489,34 @@ function App() {
     );
   }
 
- function handleAccessToken(token, email) {
-    // Store access info temporarily
-    localStorage.setItem('vektor_access_token', token);
-    localStorage.setItem('vektor_access_email', email);
-    
-    // Do NOT set authenticated yet. Send them to the Auth Screen to login/signup.
-    setCurrentScreen(SCREENS.PASSWORD);
+  // --- UPDATED: HANDOFF FROM LANDING PAGE ---
+  function handleStartAccess(type, email) {
+    if (type === 'WAITLIST_USER') {
+      setAccountEmail(email || localStorage.getItem('vektor_access_email') || '');
+      setCurrentScreen(SCREENS.ACCOUNT_CREATION);
+    } else {
+      setCurrentScreen(SCREENS.PASSWORD);
+    }
+  }
+
+  // --- NEW: ACCOUNT CREATION COMPLETE ---
+  function handleAccountCreationComplete() {
+    const token = localStorage.getItem('vektor_access_token');
+    if (token && token !== 'GHOST-ADMIN') {
+      import('./logic/supabase').then(({ burnAccessToken }) => {
+        burnAccessToken(token);
+      });
+      localStorage.removeItem('vektor_access_token');
+    }
+    localStorage.removeItem('vektor_access_email');
+    setAuthState(true);
   }
 
   async function handleLogout() {
-    // 1. Kill the cloud session securely
     await signOutCloud();
-    
-    // 2. Wipe the local storage backups
     removeFromStorage(STORAGE_KEYS.ACCESS);
     localStorage.removeItem('vektor_access_token');
     localStorage.removeItem('vektor_access_email');
-    
-    // 3. Reset the UI
     setAuthState(false);
     setCurrentScreen(SCREENS.LANDING);
   }
@@ -545,7 +576,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      {isAuthenticated && currentScreen !== SCREENS.PASSWORD && (
+      {isAuthenticated && currentScreen !== SCREENS.PASSWORD && currentScreen !== SCREENS.ACCOUNT_CREATION && (
         <NavBar
           currentScreen={currentScreen}
           onNavigate={goToScreen}
@@ -555,13 +586,21 @@ function App() {
 
       <main className="app-main">
         {currentScreen === SCREENS.LANDING && (
-          <LandingPage onStartAccess={handleAccessToken} />
+          <LandingPage onStartAccess={handleStartAccess} />
         )}
 
         {currentScreen === SCREENS.PASSWORD && (
           <AuthScreen
             setIsAuthenticated={handleAuthChange}
             setCurrentScreen={goToScreen}
+          />
+        )}
+
+        {currentScreen === SCREENS.ACCOUNT_CREATION && (
+          <AccountCreation
+            email={accountEmail}
+            onComplete={handleAccountCreationComplete}
+            onBack={() => setCurrentScreen(SCREENS.LANDING)}
           />
         )}
 

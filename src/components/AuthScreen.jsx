@@ -1,26 +1,17 @@
 // src/components/AuthScreen.jsx
 import { useState, useEffect } from "react";
-import { signInCloud, signUpCloud } from "../logic/supabase";
+import { signInCloud, signUpCloud, burnAccessToken } from "../logic/supabase";
 
 export default function AuthScreen({ setIsAuthenticated, setCurrentScreen }) {
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  
-  // Form fields
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
+  const [form, setForm] = useState({ email: '', password: '', confirm: '', name: '' });
+  const [consent, setConsent] = useState({ terms: false, beta: false, security: false });
 
-  // Consent Checkboxes (Signup only)
-  const [consentTerms, setConsentTerms] = useState(false);
-  const [consentBeta, setConsentBeta] = useState(false);
-  const [consentSecurity, setConsentSecurity] = useState(false);
-
-  // Auto-fill email from waitlist token step if available
   useEffect(() => {
     const savedEmail = localStorage.getItem('vektor_access_email');
-    if (savedEmail) setEmail(savedEmail);
+    if (savedEmail) setForm(f => ({ ...f, email: savedEmail }));
   }, []);
 
   const handleSubmit = async (e) => {
@@ -29,115 +20,254 @@ export default function AuthScreen({ setIsAuthenticated, setCurrentScreen }) {
     setLoading(true);
 
     if (!isLogin) {
-      if (!consentTerms || !consentBeta || !consentSecurity) {
-        setError("You must accept all terms and security warnings to join the beta.");
+      if (form.password !== form.confirm) {
+        setError("Passwords do not match.");
         setLoading(false);
         return;
       }
-      if (!name) {
-        setError("Operator Name is required.");
+      if (!Object.values(consent).every(Boolean)) {
+        setError("All confirmations are required to continue.");
         setLoading(false);
         return;
       }
     }
 
-    let res;
-    if (isLogin) {
-      res = await signInCloud(email, password);
-    } else {
-      res = await signUpCloud(email, password, name);
-    }
+    const res = isLogin
+      ? await signInCloud(form.email, form.password)
+      : await signUpCloud(form.email, form.password, form.name);
 
     if (res.success) {
+      // 🔒 FIX: Burn token on first login OR signup — covers both paths
+      const token = localStorage.getItem('vektor_access_token');
+      if (token && token !== 'GHOST-ADMIN') {
+        await burnAccessToken(token);
+        localStorage.removeItem('vektor_access_token');
+      }
       setIsAuthenticated(true);
-      // Let App.jsx handle the routing based on user profile state
     } else {
       setError(res.error || "Authentication failed. Please try again.");
     }
-    
     setLoading(false);
   };
 
   return (
-    <div className="auth-page">
+    <div style={{
+      minHeight: '100vh',
+      background: '#050505',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '1rem'
+    }}>
+      <style>{`
+        .auth-card {
+          width: 100%;
+          max-width: 400px;
+          background: #0a0a0a;
+          border: 1px solid rgba(255,255,255,0.08);
+          padding: 1.5rem;
+          font-family: 'SF Mono', 'Courier New', monospace;
+          color: #ffffff;
+        }
+        .auth-input {
+          width: 100%;
+          padding: 0.7rem;
+          background: #1a1a1a;
+          border: 1px solid rgba(255,255,255,0.08);
+          color: #ffffff;
+          box-sizing: border-box;
+          margin-bottom: 0.75rem;
+          font-family: inherit;
+          font-size: 0.85rem;
+          transition: 0.2s;
+        }
+        .auth-input:focus {
+          outline: none;
+          border-color: #00ff88;
+          box-shadow: 0 0 0 1px rgba(0,255,136,0.15);
+        }
+        .auth-input::placeholder {
+          color: rgba(255,255,255,0.28);
+        }
+        .auth-label {
+          display: block;
+          margin-bottom: 0.35rem;
+          color: #00ff88;
+          font-size: 0.65rem;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+        }
+        .auth-btn {
+          width: 100%;
+          padding: 0.85rem;
+          border: none;
+          cursor: pointer;
+          text-transform: uppercase;
+          font-weight: bold;
+          font-size: 0.8rem;
+          letter-spacing: 1px;
+          background: #00ff88;
+          color: #050505;
+          font-family: inherit;
+          transition: 0.2s;
+        }
+        .auth-btn:hover:not(:disabled) {
+          background: #3DDC97;
+        }
+        .auth-btn:active:not(:disabled) {
+          transform: translateY(1px);
+        }
+        .auth-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .auth-toggle {
+          background: none;
+          border: none;
+          color: rgba(255,255,255,0.38);
+          font-size: 0.65rem;
+          margin-top: 1.25rem;
+          width: 100%;
+          cursor: pointer;
+          font-family: inherit;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          transition: 0.2s;
+        }
+        .auth-toggle:hover {
+          color: #00ff88;
+        }
+        .auth-error {
+          color: rgba(255,68,68,0.8);
+          font-size: 0.7rem;
+          padding: 0.6rem;
+          border: 1px solid rgba(255,68,68,0.3);
+          margin-bottom: 1rem;
+          background: rgba(255,68,68,0.03);
+        }
+        .auth-consent-box {
+          background: #1a1a1a;
+          padding: 0.75rem;
+          margin-bottom: 1rem;
+          border: 1px solid rgba(255,255,255,0.06);
+          font-size: 0.65rem;
+          color: rgba(255,255,255,0.6);
+        }
+        .auth-consent-box label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 6px;
+          cursor: pointer;
+        }
+        .auth-consent-box label:last-child {
+          margin-bottom: 0;
+        }
+        .auth-consent-box input[type="checkbox"] {
+          accent-color: #00ff88;
+        }
+        .auth-consent-warning {
+          color: rgba(255,68,68,0.7);
+        }
+      `}</style>
+
       <div className="auth-card">
-        <h1 className="auth-title mb-6">▲ VEKTOR</h1>
-        <p className="auth-tagline mb-8">
-          {isLogin ? "Authenticate to Access Console" : "Register Operator Account"}
-        </p>
+        <h1 style={{
+          color: '#ffffff',
+          fontSize: '1rem',
+          marginBottom: '1.5rem',
+          fontWeight: 'bold',
+          letterSpacing: '2px',
+          textAlign: 'center'
+        }}>
+          VEKTÖR █
+        </h1>
 
-        {error && <div className="error-message mb-4">{error}</div>}
+        {error && <div className="auth-error">{error}</div>}
 
-        <form onSubmit={handleSubmit} className="stack">
+        <form onSubmit={handleSubmit}>
           {!isLogin && (
             <div>
-              <label className="form-label">Operator Name</label>
+              <label className="auth-label">Username</label>
               <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ghost..."
-                required={!isLogin}
+                className="auth-input"
+                value={form.name}
+                placeholder="e.g. ghost_operator"
+                onChange={e => setForm({ ...form, name: e.target.value })}
+                required
               />
             </div>
           )}
 
-          <div>
-            <label className="form-label">Email Address</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="operator@email.com"
-              required
-            />
-          </div>
+          <label className="auth-label">Email</label>
+          <input
+            className="auth-input"
+            type="email"
+            value={form.email}
+            placeholder="you@email.com"
+            onChange={e => setForm({ ...form, email: e.target.value })}
+            required
+          />
 
-          <div>
-            <label className="form-label">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-              minLength="6"
-            />
-          </div>
+          <label className="auth-label">Password</label>
+          <input
+            className="auth-input"
+            type="password"
+            value={form.password}
+            placeholder="••••••••"
+            onChange={e => setForm({ ...form, password: e.target.value })}
+            required
+          />
 
           {!isLogin && (
-            <div className="private-beta-notice mt-4 mb-4 stack">
-              <h4 className="private-beta-title">Required Security Clearances</h4>
-              
-              <label className="checkbox-row">
-                <input type="checkbox" checked={consentTerms} onChange={(e) => setConsentTerms(e.target.checked)} />
-                <span className="text-sm text-secondary">I accept the Terms of Service and Privacy Policy.</span>
-              </label>
+            <>
+              <label className="auth-label">Confirm Password</label>
+              <input
+                className="auth-input"
+                type="password"
+                value={form.confirm}
+                placeholder="••••••••"
+                onChange={e => setForm({ ...form, confirm: e.target.value })}
+                required
+              />
 
-              <label className="checkbox-row">
-                <input type="checkbox" checked={consentBeta} onChange={(e) => setConsentBeta(e.target.checked)} />
-                <span className="text-sm text-secondary">I understand VEKTOR is an early beta. There are no guaranteed results, and this is not financial or legal advice.</span>
-              </label>
-
-              <label className="checkbox-row">
-                <input type="checkbox" checked={consentSecurity} onChange={(e) => setConsentSecurity(e.target.checked)} />
-                <span className="text-sm text-danger font-bold">I will NEVER enter seed phrases, private keys, wallet passwords, or API keys into VEKTOR.</span>
-              </label>
-            </div>
+              <div className="auth-consent-box">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={consent.terms}
+                    onChange={e => setConsent({ ...consent, terms: e.target.checked })}
+                  />
+                  I accept the Terms of Service
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={consent.beta}
+                    onChange={e => setConsent({ ...consent, beta: e.target.checked })}
+                  />
+                  I understand this is beta software
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={consent.security}
+                    onChange={e => setConsent({ ...consent, security: e.target.checked })}
+                  />
+                  <span className="auth-consent-warning">I will never enter private keys or seed phrases</span>
+                </label>
+              </div>
+            </>
           )}
 
-          <button type="submit" className="primary mt-4" disabled={loading}>
-            {loading ? "Processing..." : (isLogin ? "ENTER CONSOLE" : "INITIALIZE ACCOUNT")}
+          <button className="auth-btn" type="submit" disabled={loading}>
+            {loading ? '[ Processing... ]' : isLogin ? 'Sign In' : 'Create Account'}
           </button>
         </form>
 
-        <hr />
-
-        <div className="text-center mt-4">
-          <button type="button" className="secondary" onClick={() => { setIsLogin(!isLogin); setError(""); }}>
-            {isLogin ? "Need to register? Initialize Account." : "Already registered? Authenticate."}
-          </button>
-        </div>
+        <button className="auth-toggle" onClick={() => { setIsLogin(!isLogin); setError(''); }}>
+          {isLogin ? 'New operator? Create account' : 'Already registered? Sign in'}
+        </button>
       </div>
     </div>
   );

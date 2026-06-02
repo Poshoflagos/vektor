@@ -34,11 +34,19 @@ export async function signUpCloud(email, password, name) {
     
     if (error) throw error
 
-    // 3. Lock in the username by saving it to the public database table
+    // 3. Lock in the username, assign Tier, and check for Admin RBAC
     if (data.user) {
+      const isAdmin = email.toLowerCase() === 'taphabiola@gmail.com';
+
       const { error: profileError } = await supabase
         .from('profiles')
-        .insert([{ id: data.user.id, username: name, email: email }])
+        .insert([{ 
+          id: data.user.id, 
+          username: name, 
+          email: email,
+          tier: 'alpha',
+          is_admin: isAdmin
+        }]);
         
       if (profileError) console.error("Profile creation error:", profileError);
     }
@@ -221,7 +229,8 @@ export async function joinWaitlistCloud(name, email, interest, experience) {
     const { count } = await supabase.from('waitlist').select('*', { count: 'exact', head: true });
     if (count >= 100) return { success: false, error: 'The early access beta is currently full (100/100).' };
 
-    const token = 'VKT-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+    // 🔒 FIX: Cryptographically secure token generation
+    const token = 'VKT-' + crypto.randomUUID().substring(0, 8).toUpperCase();
 
     const { data: wl, error: wlError } = await supabase.from('waitlist').insert([{
       name, email, primary_interest: interest, experience_level: experience, consent_accepted: true
@@ -232,8 +241,12 @@ export async function joinWaitlistCloud(name, email, interest, experience) {
       throw wlError;
     }
 
+    // 🔒 FIX: Token now has 7-day expiry
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
     const { error: tkError } = await supabase.from('waitlist_access_tokens').insert([{
-      waitlist_id: wl.id, email, token
+      waitlist_id: wl.id, email, token, status: 'active', expires_at: expiresAt.toISOString()
     }]);
     if (tkError) throw tkError;
 
@@ -245,11 +258,151 @@ export async function joinWaitlistCloud(name, email, interest, experience) {
 
 export async function verifyAccessToken(email, token) {
   try {
+    // 🔒 FIX: Also checks token hasn't expired
     const { data, error } = await supabase.from('waitlist_access_tokens')
-      .select('*').eq('email', email).eq('token', token).eq('status', 'active').single();
+      .select('*').eq('email', email).eq('token', token).eq('status', 'active')
+      .gt('expires_at', new Date().toISOString()).single();
     if (error || !data) return { success: false, error: 'Invalid or expired access token.' };
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
+  }
+}
+
+export async function burnAccessToken(tokenStr) {
+  if (!tokenStr) return { success: false };
+  try {
+    const { error } = await supabase
+      .from('waitlist_access_tokens')
+      .update({ status: 'used' })
+      .eq('token', tokenStr);
+      
+    if (error) throw error;
+    return { success: true };
+  } catch (error) {
+    console.error("Token burn error:", error.message);
+    return { success: false };
+  }
+}
+
+// ==========================================
+// PROOF VERIFICATION (DAY 2)
+// ==========================================
+
+// Extract handle from a URL
+function extractHandleFromUrl(url, platform) {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const path = u.pathname.replace(/^\/|\/$/g, '');
+    
+    switch (platform) {
+      case 'github':
+        return path.split('/')[0]?.toLowerCase() || null;
+      case 'x':
+      case 'twitter':
+        return path.split('/')[0]?.replace('@', '').toLowerCase() || null;
+      case 'telegram':
+        return path.replace('@', '').toLowerCase() || null;
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+// Cross-reference a submitted proof URL against operator's stored social handles
+export async function verifyProofIdentity(userId, proofUrl, proofType) {
+  try {
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('github_username, x_username, telegram_id')
+      .eq('id', userId)
+      .single();
+      
+    if (profileError || !profile) {
+      return { verified: false, reason: 'Operator profile not found.' };
+    }
+
+    let extractedHandle = null;
+    let storedHandle = null;
+    let platform = null;
+
+    if (proofType === 'LINK' || proofUrl.includes('github.com')) {
+      extractedHandle = extractHandleFromUrl(proofUrl, 'github');
+      storedHandle = profile.github_username?.toLowerCase();
+      platform = 'GitHub';
+    } else if (proofUrl.includes('x.com') || proofUrl.includes('twitter.com')) {
+      extractedHandle = extractHandleFromUrl(proofUrl, 'x');
+      storedHandle = profile.x_username?.toLowerCase();
+      platform = 'X';
+    } else if (proofUrl.includes('t.me')) {
+      extractedHandle = extractHandleFromUrl(proofUrl, 'telegram');
+      storedHandle = profile.telegram_id?.toLowerCase();
+      platform = 'Telegram';
+    }
+
+    if (!platform) {
+      return { verified: true, reason: 'No identity check needed for this proof type.' };
+    }
+
+    if (!extractedHandle) {
+      return { verified: false, reason: `Could not extract ${platform} handle from URL.` };
+    }
+
+    if (!storedHandle) {
+      return { verified: false, reason: `No ${platform} handle linked to your profile. Please add it in Settings.` };
+    }
+
+    if (extractedHandle === storedHandle) {
+      return { verified: true, reason: `${platform} handle matches.` };
+    }
+
+    return { 
+      verified: false, 
+      reason: `URL handle (${extractedHandle}) does not match your linked ${platform} (${storedHandle}).` 
+    };
+
+  } catch (err) {
+    console.error('Proof identity verification error:', err);
+    return { verified: false, reason: 'Verification failed due to a system error.' };
+  }
+}
+
+// Mark a proof as validated or challenged
+export async function updateProofValidation(proofId, status, reason = null) {
+  try {
+    const { data, error } = await supabase
+      .from('proof_links')
+      .update({ 
+        validated: status === 'validated',
+        validation_status: status,
+        validation_reason: reason,
+        validated_at: status === 'validated' ? new Date().toISOString() : null
+      })
+      .eq('id', proofId)
+      .select();
+      
+    if (error) throw error;
+    return { success: true, data: data[0] };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// Load all proofs for an operator (with validation status)
+export async function loadProofsCloud(userId) {
+  try {
+    const { data, error } = await supabase
+      .from('proof_links')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+      
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err.message, data: [] };
   }
 }
